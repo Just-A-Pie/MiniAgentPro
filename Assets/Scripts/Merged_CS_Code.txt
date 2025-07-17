@@ -1,0 +1,3967 @@
+// 文件: AgentAnimationController.cs
+using UnityEngine;
+using UnityEngine.UI;
+using System.Linq;
+
+public class AgentAnimationController : MonoBehaviour
+{
+    // ָͼͼĸƣ "adam_hi"
+    public string spriteSheetName;
+
+    private Sprite[] allFrames; // 洢иͼ12֡
+    private Image image; // ʾ UI Image
+
+    public enum Direction { Down, Left, Right, Up }
+    private Direction currentDirection = Direction.Down;
+    private int currentFrameCycle = 0;
+    private float animationTimer = 0f;
+    public float baseFrameDuration = 0.2f; // ÿ֡ʱɸƶٶȵ
+
+    // idle ֱ֡ΪDown=1, Left=4, Right=7, Up=10
+    private readonly int[] idleFrameIndices = { 1, 4, 7, 10 };
+
+    private bool framesLoaded = false;
+
+    private void Awake()
+    {
+        image = GetComponent<Image>();
+        if (string.IsNullOrEmpty(spriteSheetName))
+        {
+            Debug.LogWarning("AgentAnimationController: spriteSheetName δãʹ GameObject ");
+            spriteSheetName = gameObject.name.Replace("Agent_", "");
+        }
+        //  Resources ¸Ƶͼ
+        allFrames = Resources.LoadAll<Sprite>(spriteSheetName);
+        if (allFrames == null || allFrames.Length < 12)
+        {
+            Debug.LogError("AgentAnimationController: ͼиͼʧܣ12֡ʵʼ֡" + (allFrames == null ? 0 : allFrames.Length));
+            framesLoaded = false;
+        }
+        else
+        {
+            // 򣬼ƸʽΪ "adam_hi_0"  "adam_hi_11"
+            allFrames = allFrames.OrderBy(s => ExtractFrameNumber(s.name)).ToArray();
+            framesLoaded = true;
+        }
+    }
+
+    private int ExtractFrameNumber(string spriteName)
+    {
+        int idx = spriteName.LastIndexOf('_');
+        if (idx >= 0 && idx < spriteName.Length - 1)
+        {
+            int num;
+            if (int.TryParse(spriteName.Substring(idx + 1), out num))
+                return num;
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// ¶ moving Ϊ true򲥷·ֱΪ idle ֡
+    /// </summary>
+    /// <param name="direction">ǰƶ</param>
+    /// <param name="moving">Ƿƶ</param>
+    /// <param name="deltaTime">ʱ</param>
+    public void UpdateAnimation(Direction direction, bool moving, float deltaTime)
+    {
+        currentDirection = direction;
+        if (!framesLoaded)
+            return;
+
+        if (!moving)
+        {
+            // ƶ״̬ʱʼΪӦ idle ֡
+            int idleIndex = idleFrameIndices[(int)currentDirection];
+            if (allFrames != null && allFrames.Length > idleIndex)
+            {
+                image.sprite = allFrames[idleIndex];
+            }
+            // öѭ
+            currentFrameCycle = 0;
+            animationTimer = 0f;
+            return;
+        }
+
+        // ƶ״̬£·
+        animationTimer += deltaTime;
+        if (animationTimer >= baseFrameDuration)
+        {
+            animationTimer -= baseFrameDuration;
+            currentFrameCycle = (currentFrameCycle + 1) % 3; // ѭ3֡
+            int baseIndex = 0;
+            switch (currentDirection)
+            {
+                case Direction.Down: baseIndex = 0; break;
+                case Direction.Left: baseIndex = 3; break;
+                case Direction.Right: baseIndex = 6; break;
+                case Direction.Up: baseIndex = 9; break;
+            }
+            int frameIndex = baseIndex + currentFrameCycle;
+            if (allFrames != null && allFrames.Length > frameIndex)
+            {
+                image.sprite = allFrames[frameIndex];
+            }
+        }
+    }
+}
+
+
+// 文件: AStarPathfinder.cs
+using UnityEngine;
+using System.Collections.Generic;
+
+public static class AStarPathfinder
+{
+    public class Node
+    {
+        public Vector2Int pos;
+        public int gCost;
+        public int hCost;
+        public int fCost { get { return gCost + hCost; } }
+        public Node parent;
+    }
+
+    // ȡ start  end ·ͼΧΪ (0,0)  (gridWidth-1, gridHeight-1)
+    public static List<Vector2Int> GetPath(Vector2Int start, Vector2Int end, int gridWidth, int gridHeight)
+    {
+        List<Node> openList = new List<Node>();
+        HashSet<Vector2Int> closedSet = new HashSet<Vector2Int>();
+
+        Node startNode = new Node { pos = start, gCost = 0, hCost = GetManhattanDistance(start, end) };
+        openList.Add(startNode);
+
+        while (openList.Count > 0)
+        {
+            // ȡ fCost СĽڵ
+            Node currentNode = openList[0];
+            for (int i = 1; i < openList.Count; i++)
+            {
+                if (openList[i].fCost < currentNode.fCost || (openList[i].fCost == currentNode.fCost && openList[i].hCost < currentNode.hCost))
+                {
+                    currentNode = openList[i];
+                }
+            }
+
+            openList.Remove(currentNode);
+            closedSet.Add(currentNode.pos);
+
+            // Ŀ
+            if (currentNode.pos == end)
+            {
+                return RetracePath(startNode, currentNode);
+            }
+
+            // 4ھӣң
+            foreach (Vector2Int neighborPos in GetNeighbors(currentNode.pos, gridWidth, gridHeight))
+            {
+                if (closedSet.Contains(neighborPos))
+                    continue;
+
+                int tentativeGCost = currentNode.gCost + 1; // ÿΪ1
+
+                Node neighborNode = openList.Find(n => n.pos == neighborPos);
+                if (neighborNode == null)
+                {
+                    neighborNode = new Node();
+                    neighborNode.pos = neighborPos;
+                    neighborNode.gCost = tentativeGCost;
+                    neighborNode.hCost = GetManhattanDistance(neighborPos, end);
+                    neighborNode.parent = currentNode;
+                    openList.Add(neighborNode);
+                }
+                else if (tentativeGCost < neighborNode.gCost)
+                {
+                    neighborNode.gCost = tentativeGCost;
+                    neighborNode.parent = currentNode;
+                }
+            }
+        }
+
+        // ûҵ·򷵻ֻ·
+        return new List<Vector2Int>() { start };
+    }
+
+    private static List<Vector2Int> GetNeighbors(Vector2Int pos, int gridWidth, int gridHeight)
+    {
+        List<Vector2Int> neighbors = new List<Vector2Int>();
+
+        // 
+        if (pos.y - 1 >= 0)
+            neighbors.Add(new Vector2Int(pos.x, pos.y - 1));
+        // 
+        if (pos.y + 1 < gridHeight)
+            neighbors.Add(new Vector2Int(pos.x, pos.y + 1));
+        // 
+        if (pos.x - 1 >= 0)
+            neighbors.Add(new Vector2Int(pos.x - 1, pos.y));
+        // 
+        if (pos.x + 1 < gridWidth)
+            neighbors.Add(new Vector2Int(pos.x + 1, pos.y));
+
+        return neighbors;
+    }
+
+    private static int GetManhattanDistance(Vector2Int a, Vector2Int b)
+    {
+        return Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
+    }
+
+    private static List<Vector2Int> RetracePath(Node startNode, Node endNode)
+    {
+        List<Vector2Int> path = new List<Vector2Int>();
+        Node currentNode = endNode;
+        while (currentNode != startNode)
+        {
+            path.Add(currentNode.pos);
+            currentNode = currentNode.parent;
+        }
+        path.Reverse();
+        // ·м
+        path.Insert(0, startNode.pos);
+        return path;
+    }
+}
+
+
+// 文件: AsyncSimulationDataLoader.cs
+using UnityEngine;
+using System.Collections;
+using System.Collections.Generic;
+using System.IO;
+using Newtonsoft.Json;
+using System;
+using System.Threading.Tasks;
+
+public class AsyncSimulationDataLoader : MonoBehaviour
+{
+    // sim ļ·Ϊգ GameManager.Instance.simPath Ĭ·ȡ
+    public string simFolderPath;
+
+    // ɺ洢ķ
+    public List<Dictionary<string, SimulationAgent>> simulationSteps;
+
+    // ¼ݼɺ
+    public Action OnDataLoaded;
+
+    private void Start()
+    {
+        // Զȡ simFolderPath
+        if (string.IsNullOrEmpty(simFolderPath))
+        {
+            if (GameManager.Instance != null && !string.IsNullOrEmpty(GameManager.Instance.simPath))
+                simFolderPath = GameManager.Instance.simPath;
+            else
+                simFolderPath = Path.Combine(Application.dataPath, "Sim");
+        }
+        Debug.Log("Async Loader ʹõ sim ļ·: " + simFolderPath);
+        StartCoroutine(LoadDataCoroutine());
+    }
+
+    private IEnumerator LoadDataCoroutine()
+    {
+        simulationSteps = new List<Dictionary<string, SimulationAgent>>();
+
+        if (!Directory.Exists(simFolderPath))
+        {
+            Debug.LogError("sim ļв: " + simFolderPath);
+            yield break;
+        }
+
+        // ȡ .json ļ
+        string[] jsonFiles = Directory.GetFiles(simFolderPath, "*.json");
+
+        // ļ򣺸ļȡʱ
+        Array.Sort(jsonFiles, (file1, file2) => {
+            DateTime time1 = ParseTimeFromFileName(Path.GetFileNameWithoutExtension(file1));
+            DateTime time2 = ParseTimeFromFileName(Path.GetFileNameWithoutExtension(file2));
+            return time1.CompareTo(time2);
+        });
+
+        Dictionary<string, SimulationAgent> previousStep = null;
+        int stepIndex = 0;
+        foreach (string file in jsonFiles)
+        {
+            // 첽ȡļݲ JSON
+            Task<Dictionary<string, SimulationAgent>> loadTask = LoadStepDataAsync(file);
+            // ȴɣ߳
+            while (!loadTask.IsCompleted)
+            {
+                yield return null;
+            }
+            Dictionary<string, SimulationAgent> stepData = loadTask.Result;
+            if (stepData == null)
+            {
+                Debug.LogWarning(" " + file + " Ϊ");
+                continue;
+            }
+
+            // һʱ䲽ȫȱʧϢ
+            if (previousStep != null)
+            {
+                foreach (var kvp in previousStep)
+                {
+                    if (!stepData.ContainsKey(kvp.Key))
+                    {
+                        stepData[kvp.Key] = kvp.Value;
+                    }
+                }
+            }
+            simulationSteps.Add(stepData);
+            previousStep = stepData;
+
+            // Ϣ
+            DateTime stepTime = ParseTimeFromFileName(Path.GetFileNameWithoutExtension(file));
+            string debugOutput = $"Step {stepIndex} {stepTime.ToString("HH:mm:ss")}\n";
+            foreach (var agentKvp in stepData)
+            {
+                string agentName = agentKvp.Key;
+                SimulationAgent agent = agentKvp.Value;
+                string pos = "";
+                if (agent.curr_tile != null && agent.curr_tile.Length >= 2)
+                {
+                    pos = $"[{agent.curr_tile[0]},{agent.curr_tile[1]}]";
+                }
+                debugOutput += $"{agentName}: {pos}\n";
+            }
+            Debug.Log(debugOutput);
+
+            stepIndex++;
+        }
+        Debug.Log("첽ɣܹ " + simulationSteps.Count + "  step ");
+        OnDataLoaded?.Invoke();
+    }
+
+    /// <summary>
+    /// 첽ȡ JSON ļɷ
+    /// </summary>
+    private async Task<Dictionary<string, SimulationAgent>> LoadStepDataAsync(string file)
+    {
+        string json = await Task.Run(() => File.ReadAllText(file));
+        try
+        {
+            Dictionary<string, SimulationAgent> stepData = JsonConvert.DeserializeObject<Dictionary<string, SimulationAgent>>(json);
+            return stepData;
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError("ļ " + file + " 쳣: " + ex.Message);
+            return null;
+        }
+    }
+
+    private DateTime ParseTimeFromFileName(string fileNameWithoutExtension)
+    {
+        // ļʽΪ "HH_MM_SS am"  "HH_MM_SS pm"
+        string[] parts = fileNameWithoutExtension.Split(' ');
+        if (parts.Length < 2)
+        {
+            Debug.LogWarning("ļʽ: " + fileNameWithoutExtension);
+            return DateTime.Today;
+        }
+        string timePart = parts[0]; // "HH_MM_SS"
+        string period = parts[1].ToLower(); // "am"  "pm"
+        string[] timeParts = timePart.Split('_');
+        if (timeParts.Length < 3)
+        {
+            Debug.LogWarning("ʱʽ: " + timePart);
+            return DateTime.Today;
+        }
+        int hour = int.Parse(timeParts[0]);
+        int minute = int.Parse(timeParts[1]);
+        int second = int.Parse(timeParts[2]);
+        if (period == "pm" && hour < 12)
+            hour += 12;
+        else if (period == "am" && hour == 12)
+            hour = 0;
+        return new DateTime(DateTime.Today.Year, DateTime.Today.Month, DateTime.Today.Day, hour, minute, second);
+    }
+}
+
+
+// 文件: AttributeEntry.cs
+[System.Serializable]
+public class AttributeEntry
+{
+    public string key;
+    public string value;
+}
+
+
+// 文件: BuildingPlacementController.cs
+using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
+using System.IO;
+
+public class BuildingPlacementController : MonoBehaviour, IPointerMoveHandler, IPointerClickHandler
+{
+    [Header("ò")]
+    public RectTransform mapContent;
+    public float gridSize = 32f;
+    public GameObject previewPrefab;
+
+    private GameObject previewInstance;
+
+    public PopupManager popupManager;  // 
+
+    public void OnPointerMove(PointerEventData eventData)
+    {
+        UpdatePreviewPosition(eventData);
+    }
+
+    public void OnPointerClick(PointerEventData eventData)
+    {
+        if (eventData.button != PointerEventData.InputButton.Left)
+            return;
+        PlaceItem(eventData);
+    }
+
+    void Update()
+    {
+        EditorItem selected = EditorManager.Instance.currentSelectedItem;
+        // ѡһƷBuilding  Object
+        if (selected != null && (selected.category == EditorItemCategory.Building || selected.category == EditorItemCategory.Object))
+        {
+            if (previewInstance == null && previewPrefab != null)
+            {
+                previewInstance = Instantiate(previewPrefab, mapContent);
+                RectTransform rt = previewInstance.GetComponent<RectTransform>();
+                rt.pivot = new Vector2(0, 1);  // Ͻê
+            }
+
+            if (previewInstance != null)
+            {
+                Image img = previewInstance.GetComponent<Image>();
+                if (img != null)
+                {
+                    img.sprite = selected.thumbnail;
+                    float factor = MapManager.Instance.backgroundScaleFactor;
+                    Vector2 newSize = new Vector2(selected.gridWidth * gridSize * factor, selected.gridHeight * gridSize * factor);
+                    previewInstance.GetComponent<RectTransform>().sizeDelta = newSize;
+                }
+                // Ԥʼ
+                previewInstance.transform.SetAsLastSibling();
+            }
+        }
+        else
+        {
+            if (previewInstance != null)
+            {
+                Destroy(previewInstance);
+                previewInstance = null;
+            }
+        }
+    }
+
+    private void UpdatePreviewPosition(PointerEventData eventData)
+    {
+        EditorItem selected = EditorManager.Instance.currentSelectedItem;
+        if (selected == null || (selected.category != EditorItemCategory.Building && selected.category != EditorItemCategory.Object))
+            return;
+
+        Vector2 localPoint;
+        // ĻתΪ mapContent Ͻǵı
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+            mapContent, eventData.position, eventData.pressEventCamera, out localPoint))
+        {
+            float factor = MapManager.Instance.backgroundScaleFactor;
+
+            int gridX = Mathf.FloorToInt(localPoint.x / (gridSize * factor));
+            int gridY = Mathf.FloorToInt(-localPoint.y / (gridSize * factor));
+
+            Vector2 snappedPos = new Vector2(
+                gridX * gridSize * factor,
+                -gridY * gridSize * factor
+            );
+
+            if (previewInstance != null)
+            {
+                RectTransform rt = previewInstance.GetComponent<RectTransform>();
+                rt.anchoredPosition = snappedPos;
+                // ö
+                previewInstance.transform.SetAsLastSibling();
+            }
+        }
+    }
+
+    private void PlaceItem(PointerEventData eventData)
+    {
+        EditorItem selected = EditorManager.Instance.currentSelectedItem;
+        if (selected == null || (selected.category != EditorItemCategory.Building && selected.category != EditorItemCategory.Object))
+            return;
+
+        Vector2 localPoint;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
+            mapContent, eventData.position, eventData.pressEventCamera, out localPoint))
+            return;
+
+        float factor = MapManager.Instance.backgroundScaleFactor;
+        int gridX = Mathf.FloorToInt(localPoint.x / (gridSize * factor));
+        int gridY = Mathf.FloorToInt(-localPoint.y / (gridSize * factor));
+
+        // ùƷ󶨵¼
+        ItemCreator.CreateItemInstanceWithClick(selected, gridX, gridY, selected.category, mapContent, popupManager);
+
+        // ? Ʒ󣬱ǵͼ޸
+        MapManager.Instance.isDirty = true;
+    }
+
+}
+
+
+// 文件: ContainerChildButtonController.cs
+using UnityEngine;
+using UnityEngine.UI;
+
+public class ContainerChildButtonController : MonoBehaviour
+{
+    public Image childImage; // ʾƷͼ
+    public string childId;   // 洢Ʒ uniqueId
+
+    /// <summary>
+    /// ʼƷť
+    /// </summary>
+    /// <param name="id">Ʒ uniqueId</param>
+    /// <param name="thumbnail">Ʒͼ</param>
+    public void Initialize(string id, Sprite thumbnail)
+    {
+        childId = id;
+        if (childImage != null && thumbnail != null)
+        {
+            childImage.sprite = thumbnail;
+            // ȱţȷ߾32
+            float origW = thumbnail.rect.width;
+            float origH = thumbnail.rect.height;
+            float scaleFactor = Mathf.Min(50f / origW, 50f / origH, 1f);
+            childImage.rectTransform.sizeDelta = new Vector2(origW * scaleFactor, origH * scaleFactor);
+        }
+
+        // ȷԤ Button ӵ¼
+        Button btn = GetComponent<Button>();
+        if (btn == null)
+        {
+            btn = gameObject.AddComponent<Button>();
+        }
+        btn.onClick.RemoveAllListeners();
+        btn.onClick.AddListener(() => {
+            PopupManager popupMgr = FindObjectOfType<PopupManager>();
+            if (popupMgr != null)
+            {
+                popupMgr.OpenChildPopup(childId);
+            }
+            else
+            {
+                Debug.LogError("PopupManager δҵ");
+            }
+        });
+    }
+}
+
+
+// 文件: DirectoryLoader.cs
+using System.Collections.Generic;
+using UnityEngine;
+using System.IO;
+
+[System.Serializable]
+public class MazeMetaInfo
+{
+    public int typeId;
+    public string world_name;
+    public int maze_width;
+    public int maze_height;
+    public float sq_tile_size;
+    public string special_constraint;
+}
+
+public class DirectoryLoader : MonoBehaviour
+{
+    [Header("ԴĿ¼")]
+    // δֶãԶ GameManager.Instance.resourcePath ȡ
+    public string baseDirectory;
+
+    [Header("")]
+    public ToolPanelManager toolPanelManager;
+
+    private void Start()
+    {
+        if (string.IsNullOrEmpty(baseDirectory))
+        {
+            if (GameManager.Instance != null)
+                baseDirectory = GameManager.Instance.resourcePath;
+            else
+                Debug.LogError("δҵ GameManager  resourcePath δã");
+        }
+
+        //  Building 
+        string buildingDirectory = Path.Combine(baseDirectory, "buildings");
+        Debug.Log("Building Directory: " + buildingDirectory);
+        if (Directory.Exists(buildingDirectory))
+        {
+            string[] buildingFolders = Directory.GetDirectories(buildingDirectory);
+            foreach (string folder in buildingFolders)
+            {
+                string folderName = Path.GetFileName(folder);
+                string jsonPath = Path.Combine(folder, "maze_meta_info.json");
+                if (File.Exists(jsonPath))
+                {
+                    string jsonText = File.ReadAllText(jsonPath);
+                    MazeMetaInfo meta = JsonUtility.FromJson<MazeMetaInfo>(jsonText);
+                    EditorItem newItem = new EditorItem();
+                    newItem.typeId = meta.typeId;
+                    newItem.itemName = folderName;  //  meta.world_name
+                    newItem.gridWidth = meta.maze_width;
+                    newItem.gridHeight = meta.maze_height;
+                    newItem.category = EditorItemCategory.Building;
+                    // ʹù̶ͼ "texture.png"
+                    string pngPath = Path.Combine(folder, "texture.png");
+                    newItem.thumbnail = LoadSpriteFromFile(pngPath);
+                    toolPanelManager.availableItems.Add(newItem);
+                }
+            }
+        }
+
+        //  Object 
+        string objectDirectory = Path.Combine(baseDirectory, "objects");
+        Debug.Log("Object Directory: " + objectDirectory);
+        if (Directory.Exists(objectDirectory))
+        {
+            string[] objectFolders = Directory.GetDirectories(objectDirectory);
+            foreach (string folder in objectFolders)
+            {
+                string folderName = Path.GetFileName(folder);
+                string jsonPath = Path.Combine(folder, "maze_meta_info.json");
+                if (File.Exists(jsonPath))
+                {
+                    string jsonText = File.ReadAllText(jsonPath);
+                    MazeMetaInfo meta = JsonUtility.FromJson<MazeMetaInfo>(jsonText);
+                    EditorItem newItem = new EditorItem();
+                    newItem.typeId = meta.typeId;
+                    newItem.itemName = folderName;
+                    newItem.gridWidth = meta.maze_width;
+                    newItem.gridHeight = meta.maze_height;
+                    newItem.category = EditorItemCategory.Object;
+                    string pngPath = Path.Combine(folder, "texture.png");
+                    newItem.thumbnail = LoadSpriteFromFile(pngPath);
+                    toolPanelManager.availableItems.Add(newItem);
+                }
+            }
+        }
+
+        //  ToolPanelManager ʾ
+        toolPanelManager.PopulateToolItems();
+    }
+
+    Sprite LoadSpriteFromFile(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            Debug.LogWarning("ļ: " + filePath);
+            return null;
+        }
+        byte[] fileData = File.ReadAllBytes(filePath);
+        Texture2D tex = new Texture2D(2, 2);
+        if (tex.LoadImage(fileData))
+            return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+        return null;
+    }
+}
+
+
+// 文件: EditorItemData.cs
+using System.Collections.Generic;
+using UnityEngine;
+
+[System.Serializable]
+public class EditorItem
+{
+    public string uniqueId;
+    public int typeId;
+    public string itemName;
+    public int gridWidth;
+    public int gridHeight;
+    public EditorItemCategory category;
+    public Sprite thumbnail;
+    public Dictionary<string, string> attributes; // ѡֵ
+}
+
+public enum EditorItemCategory
+{
+    All,
+    Object,
+    Building,
+    Suit
+}
+
+
+// 文件: EditorManager.cs
+using UnityEngine;
+
+public class EditorManager : MonoBehaviour
+{
+    public static EditorManager Instance;
+    public EditorItem currentSelectedItem;
+    public float gridSize = 32f; // ÿ 3232
+
+    private void Awake()
+    {
+        SetSelectedItem(null);
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
+
+    public void SetSelectedItem(EditorItem item)
+    {
+        currentSelectedItem = item;
+        Debug.Log("ǰѡƷ" + (item != null ? item.itemName : ""));
+    }
+}
+
+
+// 文件: GameManager.cs
+using UnityEngine;
+
+public class GameManager : MonoBehaviour
+{
+    public static GameManager Instance;
+
+    public string resourcePath; // ͼԴ·
+    public string simPath;      // ·
+
+    private void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+            //  simPath δãĬֵ
+            if (string.IsNullOrEmpty(simPath))
+            {
+                simPath = System.IO.Path.Combine(Application.dataPath, "Sim");
+            }
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
+}
+
+
+// 文件: GridHoverDisplay.cs
+using UnityEngine;
+using UnityEngine.EventSystems;
+using TMPro;
+
+public class GridHoverDisplay : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerMoveHandler
+{
+    // ԭʼÿӵĳߴ磨32أǵͼʱĸӳߴ
+    public float gridSize = 32f;
+    // ʾǰڸ TMP_Text 
+    public TMP_Text hoverText;
+
+    public void OnPointerEnter(PointerEventData eventData)
+    {
+        UpdateHoverText(eventData);
+    }
+
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        if (hoverText != null)
+            hoverText.text = "";
+    }
+
+    public void OnPointerMove(PointerEventData eventData)
+    {
+        UpdateHoverText(eventData);
+    }
+
+    private void UpdateHoverText(PointerEventData eventData)
+    {
+        if (SimulationMapManager.Instance == null || SimulationMapManager.Instance.mapImage == null)
+        {
+            Debug.LogWarning("SimulationMapManager  mapImage δã");
+            return;
+        }
+        // ʹʵȾĵͼ Image  RectTransform
+        RectTransform mapImageRect = SimulationMapManager.Instance.mapImage.rectTransform;
+        Vector2 localPoint;
+        // ĻתΪ mapImageRect ڵľֲ
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(mapImageRect, eventData.position, eventData.pressEventCamera, out localPoint))
+        {
+            // ͼϽǵ꣨Rect  xMin, yMax
+            Vector2 topLeft = new Vector2(mapImageRect.rect.xMin, mapImageRect.rect.yMax);
+            //  localPointʹϽΪ (0,0)
+            Vector2 adjustedPoint = localPoint - topLeft;
+            // Чӳߴ = gridSize * backgroundScaleFactor SimulationMapManager мӣ
+            float effectiveGridSize = gridSize * SimulationMapManager.Instance.backgroundScaleFactor;
+            int gridX = Mathf.FloorToInt(adjustedPoint.x / effectiveGridSize);
+            int gridY = Mathf.FloorToInt(-adjustedPoint.y / effectiveGridSize);
+            if (hoverText != null)
+                hoverText.text = $"Grid: ({gridX}, {gridY})";
+        }
+    }
+}
+
+
+// 文件: ItemCreator.cs
+using UnityEngine;
+using UnityEngine.UI;
+using static MapManager;
+
+public static class ItemCreator
+{
+    public static void CreateItemInstanceWithClick(EditorItem item, int gridX, int gridY, EditorItemCategory cat, RectTransform mapContent, PopupManager popupManager, string uniqueId = null, string itemName = null, System.Collections.Generic.Dictionary<string, string> attributes = null)
+    {
+        float factor = MapManager.Instance.backgroundScaleFactor;
+        Vector2 pos = new Vector2(gridX * 32f * factor, -gridY * 32f * factor);
+
+        GameObject go = new GameObject($"{cat}_Loaded", typeof(Image));
+        go.transform.SetParent(mapContent, false);
+        Image img = go.GetComponent<Image>();
+        img.sprite = item.thumbnail;
+        RectTransform rt = img.rectTransform;
+        rt.sizeDelta = new Vector2(item.gridWidth * 32f * factor, item.gridHeight * 32f * factor);
+        rt.pivot = new Vector2(0, 1);
+        rt.anchorMin = new Vector2(0, 1);
+        rt.anchorMax = new Vector2(0, 1);
+        rt.anchoredPosition = pos;
+
+        if (cat == EditorItemCategory.Object)
+            go.transform.SetAsLastSibling();
+        else
+            go.transform.SetSiblingIndex(mapContent.childCount - 1);
+
+        if (string.IsNullOrEmpty(uniqueId))
+            uniqueId = System.Guid.NewGuid().ToString();
+
+        go.name = uniqueId;
+
+        if (string.IsNullOrEmpty(itemName))
+            itemName = item.itemName;
+
+        // µ EditorItem ֵ䣨
+        EditorItem copiedItem = new EditorItem
+        {
+            uniqueId = uniqueId,
+            typeId = item.typeId,
+            itemName = itemName,
+            gridWidth = item.gridWidth,
+            gridHeight = item.gridHeight,
+            category = item.category,
+            thumbnail = item.thumbnail,
+            attributes = attributes != null ? new System.Collections.Generic.Dictionary<string, string>(attributes) : new System.Collections.Generic.Dictionary<string, string>()
+        };
+
+        PlacedItem placedItem = new PlacedItem
+        {
+            uniqueId = uniqueId,
+            item = copiedItem,
+            category = cat,
+            typeId = item.typeId,
+            gridX = gridX,
+            gridY = gridY,
+            gridWidth = item.gridWidth,
+            gridHeight = item.gridHeight
+        };
+
+        MapManager.Instance.placedItems.Add(placedItem);
+
+        Button btn = go.AddComponent<Button>();
+        btn.onClick.AddListener(() => OnItemClicked(placedItem, popupManager));
+    }
+
+    private static void OnItemClicked(PlacedItem selected, PopupManager popupManager)
+    {
+        // ÿεʱȫв
+        PlacedItem updated = MapManager.Instance.placedItems.Find(x => x.uniqueId == selected.uniqueId);
+        if (popupManager != null)
+        {
+            popupManager.ShowPopup(updated);
+        }
+        else
+        {
+            Debug.LogError("PopupManager δ󶨣");
+        }
+    }
+}
+
+
+// 文件: LoadingPanelController.cs
+using UnityEngine;
+using UnityEngine.UI;
+
+public class LoadingPanelController : MonoBehaviour
+{
+    // ָתָʾ Image һԲ Spinner ͼ
+    public Image spinnerImage;
+    // תٶȣλ/
+    public float rotationSpeed = 90f;
+
+    private bool isSpinning = false;
+
+    private void OnEnable()
+    {
+        StartSpinning();
+    }
+
+    private void OnDisable()
+    {
+        StopSpinning();
+    }
+
+    /// <summary>
+    /// ʼת
+    /// </summary>
+    public void StartSpinning()
+    {
+        isSpinning = true;
+    }
+
+    /// <summary>
+    /// ֹͣת
+    /// </summary>
+    public void StopSpinning()
+    {
+        isSpinning = false;
+    }
+
+    private void Update()
+    {
+        if (isSpinning && spinnerImage != null)
+        {
+            // ÿ֡ rotationSpeed ת spinnerImage  RectTransform
+            spinnerImage.rectTransform.Rotate(Vector3.forward, rotationSpeed * Time.deltaTime);
+        }
+    }
+
+    /// <summary>
+    /// ʾ Loading Panel
+    /// </summary>
+    public void Show()
+    {
+        gameObject.SetActive(true);
+        StartSpinning();
+    }
+
+    /// <summary>
+    ///  Loading Panel
+    /// </summary>
+    public void Hide()
+    {
+        StopSpinning();
+        gameObject.SetActive(false);
+    }
+}
+
+
+// 文件: MapDragController.cs
+using UnityEngine;
+using UnityEngine.EventSystems;
+
+public class MapDragController : MonoBehaviour, IBeginDragHandler, IDragHandler
+{
+    private Vector2 originalLocalPointerPosition;
+    private Vector3 originalLocalPosition;
+    private RectTransform rt;
+    private RectTransform parentRT;
+
+    void Awake()
+    {
+        rt = GetComponent<RectTransform>();
+        parentRT = rt.parent as RectTransform;
+    }
+
+    // ʼק
+    public void OnBeginDrag(PointerEventData data)
+    {
+        // ֻʹҼ
+        if (data.button != PointerEventData.InputButton.Right)
+            return;
+
+        // ¼ǰ localPosition Ϊʼλ
+        originalLocalPosition = rt.localPosition;
+
+        // ¼קʼʱڸеı
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(
+            parentRT, data.position, data.pressEventCamera, out originalLocalPointerPosition);
+    }
+
+    // ק
+    public void OnDrag(PointerEventData data)
+    {
+        if (data.button != PointerEventData.InputButton.Right)
+            return;
+
+        Vector2 localPointerPos;
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+            parentRT, data.position, data.pressEventCamera, out localPointerPos))
+        {
+            // ƫ
+            Vector2 offset = localPointerPos - originalLocalPointerPosition;
+            rt.localPosition = originalLocalPosition + (Vector3)offset;
+
+            // ƣ clamp 
+            // rt.localPosition = ClampToWindow(rt.localPosition);
+        }
+    }
+
+    // ϶Χʵ
+    // private Vector3 ClampToWindow(Vector3 pos)
+    // {
+    //     // Example: do nothing => free drag
+    //     return pos;
+    // }
+}
+
+
+// 文件: MapManager.cs
+using UnityEngine;
+using UnityEngine.UI;
+using System.IO;
+using System.Collections.Generic;
+using System;
+
+public class MapManager : MonoBehaviour
+{
+    public static MapManager Instance;
+    public PopupManager popupManager;
+
+    private void Awake()
+    {
+        if (Instance == null)
+            Instance = this;
+        else
+            Destroy(gameObject);
+    }
+
+    [Header("ͼʾ")]
+    public RectTransform mapDisplayArea; // MapDisplayPanel
+
+    [Header("ͼ")]
+    public RectTransform mapContent;     // 
+
+    [Header("Դļ")]
+    public string mapFolder; // Ϊգ GameManager.Instance.resourcePath ȡ
+
+    [Header("ͼͼļ")]
+    public string mapTextureFileName = "texture.png";
+
+    // ȫֵͼԪݣ {mapFolder}/map/maze_meta_info.json
+    [Serializable]
+    public class MapMetaInfo
+    {
+        public string world_name;
+        public int maze_width;
+        public int maze_height;
+        public float sq_tile_size;
+        public string special_constraint;
+    }
+    public MapMetaInfo mapMeta;
+
+    // ÿ Building/Object Դݰڸļµ maze_meta_info.json
+    // ڹ typeId ļƵӳ
+    [Serializable]
+    public class MazeMetaInfo
+    {
+        public int typeId;
+        public string world_name;
+        public int maze_width;
+        public int maze_height;
+        public float sq_tile_size;
+        public string special_constraint;
+    }
+
+    // ͼ
+    public Image mapImage;
+
+    [Header("")]
+    public ToolPanelManager toolPanelManager;
+
+    [Header("")]
+    public float gridSize = 32f;             // ÿ3232
+    public float backgroundScaleFactor = 1f; // ͼ
+
+    // ============== ԭݣʱʹãɰ棩 ==============
+    // ɰ Maze 飺ʱááжϣɰ߼
+    private int[,] sectorMaze;         // Ӧɰ sector_maze.csv
+    private int[,] objectMaze;         // Ӧɰ game_object_maze.csv
+
+    [Header("CSV ļ( map/maze Ŀ¼) - ɰ")]
+    public string sectorMazeFile = "sector_maze.csv";
+    public string objectMazeFile = "game_object_maze.csv";
+
+    // ============== ݣڱʱȫ Map ݣ ==============
+    // ° Map  Maze ݣĲ㣩
+    private int[,] mapSectorMaze;
+    private int[,] mapArenaMaze;
+    private int[,] mapGameobjectMaze;
+    private int[,] mapCollisionMaze;
+    // °ȫ Maze ļʱʹã {mapFolder}/map/maze/ £
+    public string arenaMazeFile = "arena_maze.csv";
+    public string gameObjectMazeFileNew = "game_object_maze.csv";
+    public string collisionMazeFile = "collision_maze.csv";
+
+    // °ȫ Block ӳļ {mapFolder}/map/special_blocks/ £
+    public string sectorBlockFile = "sector_blocks.csv";
+    public string arenaBlockFile = "arena_blocks.csv";
+    public string gameObjectBlockFile = "game_object_blocks.csv";
+
+    private Dictionary<string, int> mapSectorBlockMapping;
+    private Dictionary<string, int> mapArenaBlockMapping;
+    private Dictionary<string, int> mapGameobjectBlockMapping;
+
+    // ==============  typeId ԴļƵӳֵ ==============
+    // ڲʵԴļƣֱʹ item.itemNameǻڸԴµ maze_meta_info.json
+    private Dictionary<int, string> buildingFolderMapping = new Dictionary<int, string>();
+    private Dictionary<int, string> objectFolderMapping = new Dictionary<int, string>();
+
+    // Ƿ޸ => ڿðť
+    public bool isDirty = false;
+
+    // ѷĿϢ JSON  buildings_data / objects_data
+    [Serializable]
+    public struct PlacedItem
+    {
+        public string uniqueId;  // ÿƷΨһID
+        public EditorItem item;
+        public EditorItemCategory category;
+        public int typeId;
+        public int gridX;
+        public int gridY;
+        public int gridWidth;
+        public int gridHeight;
+    }
+    public List<PlacedItem> placedItems = new List<PlacedItem>();
+
+    // лת DictionaryJsonUtility ֱ֧л Dictionary
+    [Serializable]
+    public class AttributeEntry
+    {
+        public string key;
+        public string value;
+    }
+
+    [Serializable]
+    public class BuildingEntry
+    {
+        public string uniqueId;
+        public int typeId;
+        public int x;
+        public int y;
+        public string itemName;
+        public List<AttributeEntry> attributes;
+    }
+    [Serializable]
+    public class BuildingsData
+    {
+        public List<BuildingEntry> buildings = new List<BuildingEntry>();
+    }
+    [Serializable]
+    public class ObjectEntry
+    {
+        public string uniqueId;
+        public int typeId;
+        public int x;
+        public int y;
+        public string itemName;
+        public List<AttributeEntry> attributes;
+    }
+    [Serializable]
+    public class ObjectsData
+    {
+        public List<ObjectEntry> objects = new List<ObjectEntry>();
+    }
+
+    private BuildingsData initialBuildingsData;
+    private ObjectsData initialObjectsData;
+
+    void Start()
+    {
+        if (string.IsNullOrEmpty(mapFolder))
+        {
+            if (GameManager.Instance != null)
+                mapFolder = GameManager.Instance.resourcePath;
+            else
+                Debug.LogError("δ mapFolder δҵ GameManager");
+        }
+
+        // Դļӳ䣨ڸԴµ maze_meta_info.json
+        BuildResourceFolderMappings();
+
+        string actualMapFolder = Path.Combine(mapFolder, "map");
+        Debug.Log("ʵʵͼļУ" + actualMapFolder);
+
+        // ȡȫֵͼԪ
+        string metaPath = Path.Combine(actualMapFolder, "maze_meta_info.json");
+        if (File.Exists(metaPath))
+        {
+            string jsonText = File.ReadAllText(metaPath);
+            mapMeta = JsonUtility.FromJson<MapMetaInfo>(jsonText);
+            Debug.Log("صͼԪݣ" + mapMeta.world_name);
+        }
+        else
+        {
+            Debug.LogWarning("δҵͼԪݣ" + metaPath);
+        }
+
+        // رͼ
+        string texturePath = Path.Combine(actualMapFolder, mapTextureFileName);
+        if (!File.Exists(texturePath))
+        {
+            Debug.LogWarning("δҵͼͼ" + texturePath);
+            return;
+        }
+        byte[] imgData = File.ReadAllBytes(texturePath);
+        Texture2D tex = new Texture2D(2, 2);
+        if (tex.LoadImage(imgData))
+        {
+            Sprite sp = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+            if (mapImage == null)
+            {
+                GameObject go = new GameObject("MapImage", typeof(Image));
+                go.transform.SetParent(mapContent, false);
+                mapImage = go.GetComponent<Image>();
+            }
+            mapImage.sprite = sp;
+            float panelW = mapDisplayArea.rect.width;
+            float panelH = mapDisplayArea.rect.height;
+            backgroundScaleFactor = Mathf.Min(panelW / tex.width, panelH / tex.height, 1f);
+            Vector2 newSize = new Vector2(tex.width * backgroundScaleFactor, tex.height * backgroundScaleFactor);
+            mapImage.rectTransform.sizeDelta = newSize;
+            mapImage.rectTransform.anchoredPosition = Vector2.zero;
+            mapImage.transform.SetSiblingIndex(0);
+            Debug.Log($"ɹصͼͼԭʼߴ磺{tex.width}x{tex.height}ź{newSize.x}x{newSize.y}");
+        }
+
+        // ================= ԭв֣ʼɰ Maze  =================
+        sectorMaze = new int[mapMeta.maze_height, mapMeta.maze_width];
+        objectMaze = new int[mapMeta.maze_height, mapMeta.maze_width];
+
+        string mazeDir = Path.Combine(actualMapFolder, "maze");
+        LoadMazeCsv(Path.Combine(mazeDir, sectorMazeFile), sectorMaze);
+        LoadMazeCsv(Path.Combine(mazeDir, objectMazeFile), objectMaze);
+
+        // ================= ֣ʼ° Map Maze  =================
+        mapSectorMaze = new int[mapMeta.maze_height, mapMeta.maze_width];
+        mapArenaMaze = new int[mapMeta.maze_height, mapMeta.maze_width];
+        mapGameobjectMaze = new int[mapMeta.maze_height, mapMeta.maze_width];
+        mapCollisionMaze = new int[mapMeta.maze_height, mapMeta.maze_width];
+        for (int r = 0; r < mapMeta.maze_height; r++)
+        {
+            for (int c = 0; c < mapMeta.maze_width; c++)
+            {
+                mapSectorMaze[r, c] = 0;
+                mapArenaMaze[r, c] = 0;
+                mapGameobjectMaze[r, c] = 0;
+                mapCollisionMaze[r, c] = 0;
+            }
+        }
+
+        // سʼ
+        string buildingDataPath = Path.Combine(actualMapFolder, "map_data", "buildings_data.json");
+        initialBuildingsData = new BuildingsData();
+        if (File.Exists(buildingDataPath))
+        {
+            string bjson = File.ReadAllText(buildingDataPath);
+            initialBuildingsData = JsonUtility.FromJson<BuildingsData>(bjson);
+        }
+        else
+        {
+            Debug.LogWarning("δҵļ" + buildingDataPath);
+        }
+
+        // سʼ
+        string objectDataPath = Path.Combine(actualMapFolder, "map_data", "objects_data.json");
+        initialObjectsData = new ObjectsData();
+        if (File.Exists(objectDataPath))
+        {
+            string ojson = File.ReadAllText(objectDataPath);
+            initialObjectsData = JsonUtility.FromJson<ObjectsData>(ojson);
+        }
+        else
+        {
+            Debug.LogWarning("δҵļ" + objectDataPath);
+        }
+
+        // ʼͼؽ󵽳У
+        ReloadMapData();
+        isDirty = false;
+    }
+
+    // ---------------- ͶԴļӳֵ ----------------
+    private void BuildResourceFolderMappings()
+    {
+        // ӳ䣺ɨ {mapFolder}/buildings ÿļе maze_meta_info.json
+        string buildingsRoot = Path.Combine(mapFolder, "buildings");
+        if (Directory.Exists(buildingsRoot))
+        {
+            foreach (string dir in Directory.GetDirectories(buildingsRoot))
+            {
+                string metaFile = Path.Combine(dir, "maze_meta_info.json");
+                if (File.Exists(metaFile))
+                {
+                    string metaJson = File.ReadAllText(metaFile);
+                    MazeMetaInfo meta = JsonUtility.FromJson<MazeMetaInfo>(metaJson);
+                    if (!buildingFolderMapping.ContainsKey(meta.typeId))
+                    {
+                        buildingFolderMapping.Add(meta.typeId, Path.GetFileName(dir));
+                        Debug.Log($"Building mapping: typeId {meta.typeId} -> {Path.GetFileName(dir)}");
+                    }
+                }
+            }
+        }
+        // ӳ䣺ɨ {mapFolder}/objects ÿļе maze_meta_info.json
+        string objectsRoot = Path.Combine(mapFolder, "objects");
+        if (Directory.Exists(objectsRoot))
+        {
+            foreach (string dir in Directory.GetDirectories(objectsRoot))
+            {
+                string metaFile = Path.Combine(dir, "maze_meta_info.json");
+                if (File.Exists(metaFile))
+                {
+                    string metaJson = File.ReadAllText(metaFile);
+                    MazeMetaInfo meta = JsonUtility.FromJson<MazeMetaInfo>(metaJson);
+                    if (!objectFolderMapping.ContainsKey(meta.typeId))
+                    {
+                        objectFolderMapping.Add(meta.typeId, Path.GetFileName(dir));
+                        Debug.Log($"Object mapping: typeId {meta.typeId} -> {Path.GetFileName(dir)}");
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------------- ޸ģGetFolderName  typeId ļ ----------------
+    private string GetFolderName(EditorItem item)
+    {
+        if (item.category == EditorItemCategory.Building)
+        {
+            if (buildingFolderMapping.ContainsKey(item.typeId))
+                return buildingFolderMapping[item.typeId];
+            else
+                return item.itemName;
+        }
+        else if (item.category == EditorItemCategory.Object)
+        {
+            if (objectFolderMapping.ContainsKey(item.typeId))
+                return objectFolderMapping[item.typeId];
+            else
+                return item.itemName;
+        }
+        return item.itemName;
+    }
+
+    // ---------------- ԭд뱣ֲ ----------------
+
+    public void RemoveItem(string uniqueId)
+    {
+        PlacedItem? itemToRemove = null;
+        foreach (var item in placedItems)
+        {
+            if (item.uniqueId == uniqueId)
+            {
+                itemToRemove = item;
+                break;
+            }
+        }
+
+        if (!itemToRemove.HasValue)
+        {
+            Debug.LogWarning($"δҵҪɾƷ: {uniqueId}");
+            return;
+        }
+
+        if (itemToRemove.Value.item.attributes != null && itemToRemove.Value.item.attributes.ContainsKey("container"))
+        {
+            string containerStr = itemToRemove.Value.item.attributes["container"];
+            if (!string.IsNullOrEmpty(containerStr))
+            {
+                string[] childIds = containerStr.Split(',');
+                foreach (string childId in childIds)
+                {
+                    RemoveItem(childId);
+                }
+            }
+        }
+
+        foreach (Transform child in mapContent)
+        {
+            if (child.gameObject.name == uniqueId)
+            {
+                Destroy(child.gameObject);
+                break;
+            }
+        }
+
+        placedItems.Remove(itemToRemove.Value);
+        isDirty = true;
+        Debug.Log($"ɾƷɹ: {uniqueId}");
+    }
+
+    private void LoadMazeCsv(string path, int[,] mazeData)
+    {
+        if (!File.Exists(path))
+        {
+            Debug.LogWarning("Maze CSV: " + path);
+            for (int r = 0; r < mapMeta.maze_height; r++)
+                for (int c = 0; c < mapMeta.maze_width; c++)
+                    mazeData[r, c] = -1;
+            return;
+        }
+        string[] lines = File.ReadAllLines(path);
+        for (int r = 0; r < mapMeta.maze_height && r < lines.Length; r++)
+        {
+            string[] cols = lines[r].Split(',');
+            for (int c = 0; c < mapMeta.maze_width && c < cols.Length; c++)
+            {
+                int val;
+                if (int.TryParse(cols[c], out val))
+                    mazeData[r, c] = val;
+                else
+                    mazeData[r, c] = -1;
+            }
+        }
+    }
+
+    public void ReloadMapData()
+    {
+        placedItems.Clear();
+
+        for (int i = mapContent.childCount - 1; i >= 0; i--)
+        {
+            Transform child = mapContent.GetChild(i);
+            if (child.gameObject.name == "MapImage")
+                continue;
+            Destroy(child.gameObject);
+        }
+
+        if (initialBuildingsData == null)
+        {
+            Debug.LogWarning("initialBuildingsData Ϊ null");
+        }
+        else if (initialBuildingsData.buildings == null)
+        {
+            Debug.LogWarning("initialBuildingsData.buildings Ϊ null");
+        }
+        else
+        {
+            Debug.Log("JSON " + initialBuildingsData.buildings.Count);
+            foreach (var entry in initialBuildingsData.buildings)
+            {
+                EditorItem buildingType = toolPanelManager.availableItems.Find(item =>
+                    item.category == EditorItemCategory.Building && item.typeId == entry.typeId);
+                if (buildingType != null)
+                {
+                    string itemName = string.IsNullOrEmpty(entry.itemName) ? buildingType.itemName : entry.itemName;
+                    Dictionary<string, string> attrs = ConvertAttributeListToDictionary(entry.attributes);
+                    ItemCreator.CreateItemInstanceWithClick(buildingType, entry.x, entry.y, EditorItemCategory.Building, mapContent, popupManager, entry.uniqueId, itemName, attrs);
+                }
+                else
+                {
+                    Debug.LogWarning($"δҵΪ Building  typeId={entry.typeId} Ʒ");
+                }
+            }
+        }
+
+        if (initialObjectsData == null)
+        {
+            Debug.LogWarning("initialObjectsData Ϊ null");
+        }
+        else if (initialObjectsData.objects == null)
+        {
+            Debug.LogWarning("initialObjectsData.objects Ϊ null");
+        }
+        else
+        {
+            Debug.Log("JSON " + initialObjectsData.objects.Count);
+            foreach (var entry in initialObjectsData.objects)
+            {
+                if (entry.x == -1 && entry.y == -1)
+                {
+                    EditorItem objectType = toolPanelManager.availableItems.Find(item =>
+                        item.category == EditorItemCategory.Object && item.typeId == entry.typeId);
+                    if (objectType != null)
+                    {
+                        string itemName = string.IsNullOrEmpty(entry.itemName) ? objectType.itemName : entry.itemName;
+                        Dictionary<string, string> attrs = ConvertAttributeListToDictionary(entry.attributes);
+                        PlacedItem childPlacedItem = new PlacedItem
+                        {
+                            uniqueId = entry.uniqueId,
+                            item = new EditorItem
+                            {
+                                uniqueId = entry.uniqueId,
+                                typeId = objectType.typeId,
+                                itemName = itemName,
+                                gridWidth = objectType.gridWidth,
+                                gridHeight = objectType.gridHeight,
+                                category = objectType.category,
+                                thumbnail = objectType.thumbnail,
+                                attributes = attrs
+                            },
+                            category = EditorItemCategory.Object,
+                            typeId = objectType.typeId,
+                            gridX = entry.x,
+                            gridY = entry.y,
+                            gridWidth = objectType.gridWidth,
+                            gridHeight = objectType.gridHeight
+                        };
+                        placedItems.Add(childPlacedItem);
+                    }
+                }
+                else
+                {
+                    EditorItem objectType = toolPanelManager.availableItems.Find(item =>
+                        item.category == EditorItemCategory.Object && item.typeId == entry.typeId);
+                    if (objectType != null)
+                    {
+                        string itemName = string.IsNullOrEmpty(entry.itemName) ? objectType.itemName : entry.itemName;
+                        Dictionary<string, string> attrs = ConvertAttributeListToDictionary(entry.attributes);
+                        ItemCreator.CreateItemInstanceWithClick(objectType, entry.x, entry.y, EditorItemCategory.Object, mapContent, popupManager, entry.uniqueId, itemName, attrs);
+                    }
+                }
+            }
+        }
+
+        Debug.Log("ͼõʼ״̬");
+        isDirty = false;
+    }
+
+    public bool CanPlaceItem(EditorItem item, int gridX, int gridY)
+    {
+        int[,] targetMaze = (item.category == EditorItemCategory.Building) ? sectorMaze : objectMaze;
+        for (int r = 0; r < item.gridHeight; r++)
+        {
+            for (int c = 0; c < item.gridWidth; c++)
+            {
+                int mr = gridY + r;
+                int mc = gridX + c;
+                if (mr < 0 || mr >= mapMeta.maze_height || mc < 0 || mc >= mapMeta.maze_width)
+                    continue;
+                if (targetMaze[mr, mc] != -1)
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    public void AddPlacedItem(EditorItem item, int gridX, int gridY)
+    {
+        int[,] targetMaze = (item.category == EditorItemCategory.Building) ? sectorMaze : objectMaze;
+        for (int r = 0; r < item.gridHeight; r++)
+        {
+            for (int c = 0; c < item.gridWidth; c++)
+            {
+                int mr = gridY + r;
+                int mc = gridX + c;
+                if (mr < 0 || mr >= mapMeta.maze_height || mc < 0 || mc >= mapMeta.maze_width)
+                    continue;
+                if (targetMaze[mr, mc] == -1)
+                    targetMaze[mr, mc] = item.typeId;
+            }
+        }
+
+        string uniqueId = System.Guid.NewGuid().ToString();
+        PlacedItem pi = new PlacedItem
+        {
+            uniqueId = uniqueId,
+            category = item.category,
+            typeId = item.typeId,
+            gridX = gridX,
+            gridY = gridY,
+            gridWidth = item.gridWidth,
+            gridHeight = item.gridHeight,
+            item = item
+        };
+        placedItems.Add(pi);
+        Debug.Log("Placed items count: " + placedItems.Count);
+        isDirty = true;
+    }
+
+    private void SaveMazeCsv(string path, int[,] mazeData)
+    {
+        string[] lines = new string[mapMeta.maze_height];
+        for (int r = 0; r < mapMeta.maze_height; r++)
+        {
+            string[] cols = new string[mapMeta.maze_width];
+            for (int c = 0; c < mapMeta.maze_width; c++)
+            {
+                cols[c] = mazeData[r, c].ToString();
+            }
+            lines[r] = string.Join(",", cols);
+        }
+        File.WriteAllLines(path, lines);
+    }
+
+    // µı淽ع° Map ݺ󱣴浽 CSV ļУ°ݣӰʱɰ湦ܣ
+    public void SaveAllCsv()
+    {
+        Debug.Log("ʼ° Map CSV ...");
+        // ع° Map 
+        RebuildMapMazeData();
+
+        string mazeDir = Path.Combine(mapFolder, "map", "maze");
+        if (!Directory.Exists(mazeDir))
+            Directory.CreateDirectory(mazeDir);
+
+        SaveMazeCsv(Path.Combine(mazeDir, sectorMazeFile), mapSectorMaze);
+        SaveMazeCsv(Path.Combine(mazeDir, arenaMazeFile), mapArenaMaze);
+        SaveMazeCsv(Path.Combine(mazeDir, gameObjectMazeFileNew), mapGameobjectMaze);
+        SaveMazeCsv(Path.Combine(mazeDir, collisionMazeFile), mapCollisionMaze);
+
+        string blockDir = Path.Combine(mapFolder, "map", "special_blocks");
+        if (!Directory.Exists(blockDir))
+            Directory.CreateDirectory(blockDir);
+
+        SaveBlockCsv(Path.Combine(blockDir, sectorBlockFile), mapSectorBlockMapping);
+        SaveBlockCsv(Path.Combine(blockDir, arenaBlockFile), mapArenaBlockMapping);
+        SaveBlockCsv(Path.Combine(blockDir, gameObjectBlockFile), mapGameobjectBlockMapping);
+
+        isDirty = false;
+        Debug.Log("° Maze CSV  Block CSV ѱ棬resetButton ɽ");
+    }
+
+    public void ResetAllCsv()
+    {
+        string mazeDir = Path.Combine(mapFolder, "map", "maze");
+        LoadMazeCsv(Path.Combine(mazeDir, sectorMazeFile), sectorMaze);
+        LoadMazeCsv(Path.Combine(mazeDir, objectMazeFile), sectorMaze);
+
+        string buildingDataPath = Path.Combine(mapFolder, "map", "map_data", "buildings_data.json");
+        if (File.Exists(buildingDataPath))
+        {
+            string bjson = File.ReadAllText(buildingDataPath);
+            initialBuildingsData = JsonUtility.FromJson<BuildingsData>(bjson);
+        }
+
+        string objectDataPath = Path.Combine(mapFolder, "map", "map_data", "objects_data.json");
+        if (File.Exists(objectDataPath))
+        {
+            string ojson = File.ReadAllText(objectDataPath);
+            initialObjectsData = JsonUtility.FromJson<ObjectsData>(ojson);
+        }
+
+        ReloadMapData();
+        isDirty = false;
+        Debug.Log(" Maze CSV Ʒ");
+    }
+
+    public void SaveMapData()
+    {
+        BuildingsData bData = new BuildingsData();
+        ObjectsData oData = new ObjectsData();
+
+        foreach (var pi in placedItems)
+        {
+            if (pi.category == EditorItemCategory.Building)
+            {
+                BuildingEntry be = new BuildingEntry
+                {
+                    uniqueId = pi.uniqueId,
+                    typeId = pi.typeId,
+                    x = pi.gridX,
+                    y = pi.gridY,
+                    itemName = pi.item.itemName,
+                    attributes = ConvertDictionaryToList(pi.item.attributes)
+                };
+                bData.buildings.Add(be);
+            }
+            else if (pi.category == EditorItemCategory.Object)
+            {
+                ObjectEntry oe = new ObjectEntry
+                {
+                    uniqueId = pi.uniqueId,
+                    typeId = pi.typeId,
+                    x = pi.gridX,
+                    y = pi.gridY,
+                    itemName = pi.item.itemName,
+                    attributes = ConvertDictionaryToList(pi.item.attributes)
+                };
+                oData.objects.Add(oe);
+            }
+        }
+
+        string actualMapFolder = Path.Combine(mapFolder, "map");
+        string buildingDataPath = Path.Combine(actualMapFolder, "map_data", "buildings_data.json");
+        string objectDataPath = Path.Combine(actualMapFolder, "map_data", "objects_data.json");
+
+        string buildingJson = JsonUtility.ToJson(bData, true);
+        string objectJson = JsonUtility.ToJson(oData, true);
+        File.WriteAllText(buildingDataPath, buildingJson);
+        File.WriteAllText(objectDataPath, objectJson);
+
+        isDirty = false;
+        Debug.Log("ͼ JSON ѱ");
+    }
+
+    private List<AttributeEntry> ConvertDictionaryToList(Dictionary<string, string> dict)
+    {
+        List<AttributeEntry> list = new List<AttributeEntry>();
+        if (dict == null)
+            return list;
+        foreach (var kvp in dict)
+        {
+            AttributeEntry entry = new AttributeEntry { key = kvp.Key, value = kvp.Value };
+            list.Add(entry);
+        }
+        return list;
+    }
+
+    private Dictionary<string, string> ConvertAttributeListToDictionary(List<AttributeEntry> list)
+    {
+        Dictionary<string, string> dict = new Dictionary<string, string>();
+        if (list == null)
+            return dict;
+        foreach (var entry in list)
+        {
+            if (!dict.ContainsKey(entry.key))
+                dict.Add(entry.key, entry.value);
+        }
+        return dict;
+    }
+
+    // ----------------  Block CSV ----------------
+    private void SaveBlockCsv(string path, Dictionary<string, int> mapping)
+    {
+        List<KeyValuePair<string, int>> list = new List<KeyValuePair<string, int>>(mapping);
+        list.Sort((a, b) => a.Value.CompareTo(b.Value));
+        List<string> lines = new List<string>();
+        foreach (var kvp in list)
+        {
+            lines.Add(kvp.Value + "," + kvp.Key);
+        }
+        File.WriteAllLines(path, lines);
+    }
+
+    // ---------------- ¹° Map  Maze ݼ Block ӳ ----------------
+    private void RebuildMapMazeData()
+    {
+        Debug.Log("ʼع°ȫ Map Maze ...");
+        int height = mapMeta.maze_height;
+        int width = mapMeta.maze_width;
+
+        // ʼ° Maze Ϊ00ʾգ
+        mapSectorMaze = new int[height, width];
+        mapArenaMaze = new int[height, width];
+        mapGameobjectMaze = new int[height, width];
+        mapCollisionMaze = new int[height, width];
+        for (int r = 0; r < height; r++)
+        {
+            for (int c = 0; c < width; c++)
+            {
+                mapSectorMaze[r, c] = 0;
+                mapArenaMaze[r, c] = 0;
+                mapGameobjectMaze[r, c] = 0;
+                mapCollisionMaze[r, c] = 0;
+            }
+        }
+        Debug.Log("° Maze ʼ");
+
+        // ʼ° Block ӳֵ䣨 sectorarenagame_object 㣩
+        mapSectorBlockMapping = new Dictionary<string, int>();
+        mapArenaBlockMapping = new Dictionary<string, int>();
+        mapGameobjectBlockMapping = new Dictionary<string, int>();
+
+        // ѷƷ° Maze 
+        foreach (var placed in placedItems)
+        {
+            int baseX = placed.gridX;
+            int baseY = placed.gridY;
+            // Ʒ gridX  gridY Ϊȫ
+            if (baseX < 0 || baseY < 0)
+            {
+                Debug.LogWarning($"Skipping placed item {placed.uniqueId} due to negative grid position: ({baseX},{baseY})");
+                continue;
+            }
+            Debug.Log($"Ʒ {placed.uniqueId}ͣ{placed.category}λã({baseX},{baseY}), ߴ磺({placed.gridWidth}x{placed.gridHeight})");
+            for (int r = 0; r < placed.gridHeight; r++)
+            {
+                for (int c = 0; c < placed.gridWidth; c++)
+                {
+                    int globalX = baseX + c;
+                    int globalY = baseY + r;
+                    if (globalX < 0 || globalX >= width || globalY < 0 || globalY >= height)
+                    {
+                        Debug.LogWarning($"Global coordinate out of range: ({globalX},{globalY}) for placed item {placed.uniqueId}");
+                        continue;
+                    }
+                    if (placed.category == EditorItemCategory.Building)
+                    {
+                        // Sector 
+                        int sectorVal = GetProvidedMazeValue(placed.item, "sector", c, r);
+                        Debug.Log($"Building {placed.uniqueId} - Sector local ({c},{r}) => value {sectorVal}");
+                        if (sectorVal != -1)
+                        {
+                            if (sectorVal == 0)
+                            {
+                                mapSectorMaze[globalY, globalX] = 0;
+                            }
+                            else
+                            {
+                                string blockName = GetProvidedBlockName(placed.item, "sector", sectorVal);
+                                Debug.Log($"Building {placed.uniqueId} - Sector local ({c},{r}) => block '{blockName}'");
+                                int mappedIndex = GetOrAddBlockIndex(mapSectorBlockMapping, blockName);
+                                mapSectorMaze[globalY, globalX] = mappedIndex;
+                            }
+                        }
+                        // Arena 
+                        int arenaVal = GetProvidedMazeValue(placed.item, "arena", c, r);
+                        Debug.Log($"Building {placed.uniqueId} - Arena local ({c},{r}) => value {arenaVal}");
+                        if (arenaVal != -1)
+                        {
+                            if (arenaVal == 0)
+                            {
+                                mapArenaMaze[globalY, globalX] = 0;
+                            }
+                            else
+                            {
+                                string blockName = GetProvidedBlockName(placed.item, "arena", arenaVal);
+                                Debug.Log($"Building {placed.uniqueId} - Arena local ({c},{r}) => block '{blockName}'");
+                                int mappedIndex = GetOrAddBlockIndex(mapArenaBlockMapping, blockName);
+                                mapArenaMaze[globalY, globalX] = mappedIndex;
+                            }
+                        }
+                        // Collision 㣨Building ֣
+                        int buildingCollision = GetProvidedMazeValue(placed.item, "collision", c, r);
+                        Debug.Log($"Building {placed.uniqueId} - Collision local ({c},{r}) => value {buildingCollision}");
+                        if (buildingCollision != -1)
+                        {
+                            mapCollisionMaze[globalY, globalX] = CombineCollision(mapCollisionMaze[globalY, globalX], buildingCollision);
+                        }
+                    }
+                    else if (placed.category == EditorItemCategory.Object)
+                    {
+                        // Game_object 
+                        int gameobjectVal = GetProvidedMazeValue(placed.item, "gameobject", c, r);
+                        Debug.Log($"Object {placed.uniqueId} - Game_object local ({c},{r}) => value {gameobjectVal}");
+                        if (gameobjectVal != -1)
+                        {
+                            if (gameobjectVal == 0)
+                            {
+                                mapGameobjectMaze[globalY, globalX] = 0;
+                            }
+                            else
+                            {
+                                string blockName = GetProvidedBlockName(placed.item, "gameobject", gameobjectVal);
+                                Debug.Log($"Object {placed.uniqueId} - Game_object local ({c},{r}) => block '{blockName}'");
+                                int mappedIndex = GetOrAddBlockIndex(mapGameobjectBlockMapping, blockName);
+                                mapGameobjectMaze[globalY, globalX] = mappedIndex;
+                            }
+                        }
+                        // Collision 㣨Object ֣
+                        int objectCollision = GetProvidedMazeValue(placed.item, "collision", c, r);
+                        Debug.Log($"Object {placed.uniqueId} - Collision local ({c},{r}) => value {objectCollision}");
+                        if (objectCollision != -1)
+                        {
+                            mapCollisionMaze[globalY, globalX] = CombineCollision(mapCollisionMaze[globalY, globalX], objectCollision);
+                        }
+                    }
+                }
+            }
+        }
+        Debug.Log("° Map Maze ع");
+    }
+
+    // ---------------- ʵļлȡֲ Maze ֵ ----------------
+    //  layer: "sector", "arena", "gameobject", "collision"
+    // localX, localY: ƷϽǵ
+    //  -1 ʾλΪ
+    private int GetProvidedMazeValue(EditorItem item, string layer, int localX, int localY)
+    {
+        string folderName = GetFolderName(item);
+        string filePath = "";
+        if (item.category == EditorItemCategory.Building)
+        {
+            if (layer == "sector")
+                filePath = Path.Combine(mapFolder, "buildings", folderName, "maze", "sector_maze.csv");
+            else if (layer == "arena")
+                filePath = Path.Combine(mapFolder, "buildings", folderName, "maze", "arena_maze.csv");
+            else if (layer == "collision")
+                filePath = Path.Combine(mapFolder, "buildings", folderName, "maze", "collision_maze.csv");
+        }
+        else if (item.category == EditorItemCategory.Object)
+        {
+            if (layer == "gameobject")
+                filePath = Path.Combine(mapFolder, "objects", folderName, "maze", "game_object_maze.csv");
+            else if (layer == "collision")
+                filePath = Path.Combine(mapFolder, "objects", folderName, "maze", "collision_maze.csv");
+        }
+        if (!File.Exists(filePath))
+        {
+            Debug.LogWarning("Maze file not found: " + filePath);
+            return -1;
+        }
+        string[] lines = File.ReadAllLines(filePath);
+        if (localY >= lines.Length)
+        {
+            Debug.LogWarning("LocalY out of range in file: " + filePath);
+            return -1;
+        }
+        string[] cols = lines[localY].Split(',');
+        if (localX >= cols.Length)
+        {
+            Debug.LogWarning("LocalX out of range in file: " + filePath);
+            return -1;
+        }
+        int value;
+        if (int.TryParse(cols[localX].Trim(), out value))
+            return value;
+        else
+            return -1;
+    }
+
+    // ---------------- ʵļлȡṩ Block  ----------------
+    // Ʒ㼶 Maze ֵ Block 
+    private string GetProvidedBlockName(EditorItem item, string layer, int mazeValue)
+    {
+        //  0 ֵĬϴΪգʾհף
+        if (mazeValue == 0)
+            return "";
+        string folderName = GetFolderName(item);
+        string filePath = "";
+        if (item.category == EditorItemCategory.Building)
+        {
+            if (layer == "sector")
+                filePath = Path.Combine(mapFolder, "buildings", folderName, "special_blocks", "sector_blocks.csv");
+            else if (layer == "arena")
+                filePath = Path.Combine(mapFolder, "buildings", folderName, "special_blocks", "arena_blocks.csv");
+            else if (layer == "collision")
+                return "";
+        }
+        else if (item.category == EditorItemCategory.Object)
+        {
+            if (layer == "gameobject")
+                filePath = Path.Combine(mapFolder, "objects", folderName, "special_blocks", "game_object_blocks.csv");
+            else if (layer == "collision")
+                return "";
+        }
+        if (!File.Exists(filePath))
+        {
+            Debug.LogWarning("Block file not found: " + filePath);
+            return "";
+        }
+        string[] lines = File.ReadAllLines(filePath);
+        foreach (string line in lines)
+        {
+            if (string.IsNullOrEmpty(line))
+                continue;
+            string[] parts = line.Split(',');
+            if (parts.Length < 2)
+                continue;
+            int index;
+            if (int.TryParse(parts[0].Trim(), out index))
+            {
+                if (index == mazeValue)
+                    return parts[1].Trim();
+            }
+        }
+        Debug.LogWarning("No matching block found in file: " + filePath + " for index: " + mazeValue);
+        return "";
+    }
+
+    // ----------------  Block ӳвһ Block ƶӦ ----------------
+    private int GetOrAddBlockIndex(Dictionary<string, int> mapping, string blockName)
+    {
+        if (string.IsNullOrEmpty(blockName))
+            return 0;
+        if (mapping.ContainsKey(blockName))
+            return mapping[blockName];
+        else
+        {
+            int newIndex = mapping.Count + 1;
+            mapping[blockName] = newIndex;
+            Debug.Log($"New block mapping added: '{blockName}' -> {newIndex}");
+            return newIndex;
+        }
+    }
+
+    // ---------------- ϲ Collision ֵ ----------------
+    // ֵֵ0򷵻ط0ֵ򷵻0
+    private int CombineCollision(int existing, int newVal)
+    {
+        if (existing != 0 || newVal != 0)
+            return (existing != 0 ? existing : newVal);
+        return 0;
+    }
+}
+
+
+// 文件: MapUIController.cs
+using UnityEngine;
+using UnityEngine.UI;
+
+public class MapUIController : MonoBehaviour
+{
+    public Button saveButton;
+    public Button resetButton;
+
+    void Start()
+    {
+        // ť󶨷
+        saveButton.onClick.AddListener(OnSaveClicked);
+        resetButton.onClick.AddListener(OnResetClicked);
+    }
+
+    void Update()
+    {
+        //  isDirty  resetButton
+        if (MapManager.Instance != null)
+        {
+            resetButton.interactable = MapManager.Instance.isDirty;
+        }
+    }
+
+    void OnSaveClicked()
+    {
+        if (MapManager.Instance != null)
+        {
+            // ͬʱ CSV + JSON
+            MapManager.Instance.SaveAllCsv();
+            MapManager.Instance.SaveMapData();
+            //  isDirty => falseresetButton Զ
+        }
+    }
+
+    void OnResetClicked()
+    {
+        if (MapManager.Instance != null && MapManager.Instance.isDirty)
+        {
+            // ûسʼ
+            MapManager.Instance.ResetAllCsv();
+            MapManager.Instance.ReloadMapData();
+            // ú isDirty => falseresetButton 
+        }
+    }
+}
+
+
+// 文件: MapZoomController.cs
+using UnityEngine;
+using UnityEngine.EventSystems;
+
+public class MapZoomController : MonoBehaviour, IScrollHandler
+{
+    [Header("Ų")]
+    public float zoomSpeed = 0.5f;   // ٶ
+    public float minScale = 0.1f;
+    public float maxScale = 8.0f;
+
+    public void OnScroll(PointerEventData eventData)
+    {
+        float scroll = eventData.scrollDelta.y;  // ֵ
+        if (Mathf.Abs(scroll) > 0.01f)
+        {
+            RectTransform rt = transform as RectTransform;
+            Vector3 oldScale = rt.localScale;
+
+            // 1) ¼ "ǰ" MapContentڵı
+            Vector2 oldLocalPos;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                rt, eventData.position, eventData.pressEventCamera, out oldLocalPos);
+
+            // 2) 
+            float scaleFactor = 1 + scroll * zoomSpeed;
+            Vector3 newScale = oldScale * scaleFactor;
+            newScale.x = Mathf.Clamp(newScale.x, minScale, maxScale);
+            newScale.y = Mathf.Clamp(newScale.y, minScale, maxScale);
+            newScale.z = 1f;
+            rt.localScale = newScale;
+
+            // 3) ¼ "ź" ı
+            Vector2 newLocalPos;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                rt, eventData.position, eventData.pressEventCamera, out newLocalPos);
+
+            // 4) offset = (newLocalPos - oldLocalPos)
+            Vector2 offset = (newLocalPos - oldLocalPos);
+
+            // === ޸ ===
+            //  anchoredPosition += offsetԱ㲻
+            rt.anchoredPosition += offset;
+
+            // Debug ۲ offset ֵ
+            // Debug.Log($"scroll={scroll} oldLocal={oldLocalPos} newLocal={newLocalPos} offset={offset} => anchoredPos={rt.anchoredPosition}");
+        }
+    }
+}
+
+
+// 文件: OptionalAttributeRowController.cs
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using System.Collections.Generic;
+
+public class OptionalAttributeRowController : MonoBehaviour
+{
+    public Toggle attributeToggle;
+    public TMP_Text attributeLabel;
+
+    // ڷ container ʹõ
+    public GameObject inputFieldContainer;
+    public TMP_InputField inputField;
+
+    //  container Ե
+    public GameObject containerPanel;      // ̶ȵ Panel  ScrollRect Content
+    public Transform childContainer;       // ڴƷť containerPanel ڣ
+    public Button addChildButton;          // ӺŰť
+    public GameObject containerChildButtonPrefab; // ƷťԤ
+
+    private string attributeName;
+
+    public void Initialize(string attrName, bool defaultEnabled, string defaultValue)
+    {
+        attributeName = attrName;
+        if (attributeLabel != null)
+            attributeLabel.text = attrName;
+
+        if (attributeToggle != null)
+        {
+            attributeToggle.isOn = defaultEnabled;
+            attributeToggle.onValueChanged.AddListener(OnToggleChanged);
+        }
+
+        if (attributeName == "container")
+        {
+            if (inputFieldContainer != null)
+                inputFieldContainer.SetActive(false);
+            if (containerPanel != null)
+                containerPanel.SetActive(defaultEnabled);
+
+            //  defaultValue ǿգŷָƷ uniqueIdӰť
+            if (!string.IsNullOrEmpty(defaultValue))
+            {
+                string[] childIds = defaultValue.Split(',');
+                foreach (string cid in childIds)
+                {
+                    // ȫ placedItems жӦƷȡͼ
+                    var child = MapManager.Instance.placedItems.Find(x => x.uniqueId == cid);
+                    Sprite thumb = (child.item != null) ? child.item.thumbnail : null;
+                    if (childContainer != null)
+                        AddChild(cid, thumb);
+                }
+            }
+        }
+        else
+        {
+            if (inputFieldContainer != null)
+                inputFieldContainer.SetActive(defaultEnabled);
+            if (containerPanel != null)
+                containerPanel.SetActive(false);
+            if (inputField != null)
+                inputField.text = defaultValue;
+        }
+    }
+
+    private void OnToggleChanged(bool isOn)
+    {
+        if (attributeName == "container")
+        {
+            if (containerPanel != null)
+            {
+                containerPanel.SetActive(isOn);
+                LayoutRebuilder.ForceRebuildLayoutImmediate(transform.parent.GetComponent<RectTransform>());
+            }
+        }
+        else
+        {
+            if (inputFieldContainer != null)
+            {
+                inputFieldContainer.SetActive(isOn);
+                LayoutRebuilder.ForceRebuildLayoutImmediate(transform.parent.GetComponent<RectTransform>());
+            }
+        }
+    }
+
+    /// <summary>
+    /// ȡǰֵ
+    ///  container ԣ childContainer Ʒ uniqueId ƴӳɵĶŷַָ
+    /// ԣ inputField ı
+    /// </summary>
+    public string GetInputValue()
+    {
+        if (attributeName == "container")
+        {
+            string result = "";
+            if (childContainer != null)
+            {
+                foreach (Transform child in childContainer)
+                {
+                    ContainerChildButtonController ccbc = child.GetComponent<ContainerChildButtonController>();
+                    if (ccbc != null)
+                    {
+                        if (!string.IsNullOrEmpty(result))
+                            result += ",";
+                        result += ccbc.childId;
+                    }
+                }
+            }
+            return result;
+        }
+        else
+        {
+            if (attributeToggle != null && attributeToggle.isOn && inputField != null)
+                return inputField.text.Trim();
+            return "";
+        }
+    }
+
+    public bool IsEnabled()
+    {
+        return attributeToggle != null && attributeToggle.isOn;
+    }
+
+    /// <summary>
+    ///  container ģʽ£һƷť childContainerȷӺŰťʼλ
+    /// </summary>
+    public void AddChild(string childId, Sprite childThumbnail)
+    {
+        if (childContainer == null)
+            return;
+        if (containerChildButtonPrefab == null)
+        {
+            Debug.LogError("containerChildButtonPrefab δã");
+            return;
+        }
+        GameObject childButtonObj = Instantiate(containerChildButtonPrefab, childContainer);
+        childButtonObj.name = childId;  // Ʒ uniqueId 
+        ContainerChildButtonController ccbc = childButtonObj.GetComponent<ContainerChildButtonController>();
+        if (ccbc != null)
+        {
+            ccbc.Initialize(childId, childThumbnail);
+        }
+        else
+        {
+            Debug.LogWarning("ContainerChildButtonController űδ " + childButtonObj.name);
+        }
+        // ֤ӺŰťʼ
+        if (addChildButton != null)
+        {
+            addChildButton.transform.SetAsLastSibling();
+        }
+    }
+
+    /// <summary>
+    /// ˢ container Ʒťݵǰ container ֵˢUI
+    /// </summary>
+    public void RefreshChildren(string containerValue)
+    {
+        if (childContainer == null)
+            return;
+        // ɾǰӰť
+        foreach (Transform child in childContainer)
+        {
+            Destroy(child.gameObject);
+        }
+        // 
+        if (!string.IsNullOrEmpty(containerValue))
+        {
+            string[] childIds = containerValue.Split(',');
+            foreach (string cid in childIds)
+            {
+                var child = MapManager.Instance.placedItems.Find(x => x.uniqueId == cid);
+                Sprite thumb = (child.item != null) ? child.item.thumbnail : null;
+                AddChild(cid, thumb);
+            }
+        }
+        // ȷӺŰť
+        if (addChildButton != null)
+        {
+            addChildButton.transform.SetAsLastSibling();
+        }
+    }
+}
+
+
+// 文件: PopupManager.cs
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using System.Collections.Generic;
+using static MapManager;
+
+public class PopupManager : MonoBehaviour
+{
+    [Header("Ԥ")]
+    public GameObject objectBuildingPopupPrefab;
+    public Transform popupParent;
+
+    [Header("ѡԤ")]
+    public GameObject optionalAttributeRowPrefab;
+
+    // ԤѡбĿǰ "quantity"  "container"
+    private List<string> optionalAttributes = new List<string>()
+    {
+        "quantity",
+        "container"
+    };
+
+    // ջڴ洢ʵֶ༶
+    private Stack<GameObject> popupStack = new Stack<GameObject>();
+
+    private GameObject currentPopup;
+    private PlacedItem? currentPlacedItem;
+    private string originalName;
+    private Dictionary<string, string> originalAttributes;
+    private TMP_InputField nameInputField;
+    private Button applyButton;
+    private bool isApplied = false;
+    private Dictionary<string, OptionalAttributeRowController> attributeRows = new Dictionary<string, OptionalAttributeRowController>();
+
+    public void ShowPopup(PlacedItem placedItem)
+    {
+        if (EditorManager.Instance.currentSelectedItem != null)
+            return;
+
+        // ʾʱնջ
+        popupStack.Clear();
+
+        if (currentPopup != null)
+            Destroy(currentPopup);
+
+        currentPopup = Instantiate(objectBuildingPopupPrefab, popupParent);
+        SetCloseButtonText(currentPopup, "");
+
+        currentPlacedItem = placedItem;
+        originalName = placedItem.item.itemName;
+        originalAttributes = placedItem.item.attributes != null ?
+                             new Dictionary<string, string>(placedItem.item.attributes) :
+                             new Dictionary<string, string>();
+        isApplied = false;
+
+        var closeButton = currentPopup.transform.Find("CloseButton")?.GetComponent<Button>();
+        if (closeButton != null)
+            closeButton.onClick.AddListener(() => { ClosePopup(); });
+
+        var basicPanel = currentPopup.transform.Find("Basic");
+        if (basicPanel != null)
+        {
+            var typeText = basicPanel.Find("TypeText")?.GetComponent<TMP_Text>();
+            if (typeText != null)
+                typeText.text = placedItem.category.ToString();
+
+            nameInputField = basicPanel.Find("NameInputField")?.GetComponent<TMP_InputField>();
+            if (nameInputField != null)
+            {
+                nameInputField.text = originalName;
+                nameInputField.onValueChanged.AddListener(OnNameChanged);
+            }
+
+            var image = basicPanel.Find("Image")?.GetComponent<Image>();
+            if (image != null && placedItem.item.thumbnail != null)
+            {
+                image.sprite = placedItem.item.thumbnail;
+                float origW = placedItem.item.thumbnail.rect.width;
+                float origH = placedItem.item.thumbnail.rect.height;
+                float scaleFactor = Mathf.Min(100f / origW, 100f / origH, 1f);
+                image.rectTransform.sizeDelta = new Vector2(origW * scaleFactor, origH * scaleFactor);
+            }
+        }
+        else
+        {
+            Debug.LogWarning("δҵ Basic ");
+        }
+
+        applyButton = currentPopup.transform.Find("ApplyButton")?.GetComponent<Button>();
+        if (applyButton != null)
+        {
+            applyButton.onClick.AddListener(ApplyChanges);
+        }
+
+        var deleteButton = currentPopup.transform.Find("DeleteButton")?.GetComponent<Button>();
+        if (deleteButton != null)
+            deleteButton.onClick.AddListener(() => DeleteItem(placedItem));
+
+        var attributesPanel = currentPopup.transform.Find("AttributesPanel");
+        if (attributesPanel != null)
+        {
+            foreach (Transform child in attributesPanel)
+                Destroy(child.gameObject);
+            attributeRows.Clear();
+            foreach (string attrName in optionalAttributes)
+            {
+                bool enabled = false;
+                string defaultVal = "";
+                if (placedItem.item.attributes != null && placedItem.item.attributes.ContainsKey(attrName))
+                {
+                    enabled = true;
+                    defaultVal = placedItem.item.attributes[attrName];
+                }
+                CreateOptionalAttributeRow(attrName, attributesPanel, enabled, defaultVal);
+            }
+        }
+        else
+        {
+            Debug.LogWarning("δҵ AttributesPanel");
+        }
+
+        DisableMapOperations();
+    }
+
+    private void SetCloseButtonText(GameObject popup, string text)
+    {
+        var closeButton = popup.transform.Find("CloseButton")?.GetComponent<Button>();
+        if (closeButton != null)
+        {
+            TMP_Text txt = closeButton.GetComponentInChildren<TMP_Text>();
+            if (txt != null)
+            {
+                txt.text = text;
+            }
+        }
+    }
+
+    private void CreateOptionalAttributeRow(string attrName, Transform parent, bool defaultEnabled, string defaultValue)
+    {
+        if (!optionalAttributeRowPrefab)
+        {
+            Debug.LogError("PopupManager: optionalAttributeRowPrefab δã");
+            return;
+        }
+        GameObject rowObj = Instantiate(optionalAttributeRowPrefab, parent);
+        rowObj.name = attrName + "_Row";
+        OptionalAttributeRowController controller = rowObj.GetComponent<OptionalAttributeRowController>();
+        if (controller != null)
+        {
+            controller.Initialize(attrName, defaultEnabled, defaultValue);
+            attributeRows[attrName] = controller;
+            if (controller.attributeToggle != null && applyButton != null)
+            {
+                controller.attributeToggle.onValueChanged.AddListener((val) => { });
+            }
+            if (attrName == "container")
+            {
+                if (controller.addChildButton != null)
+                {
+                    controller.addChildButton.onClick.RemoveAllListeners();
+                    controller.addChildButton.onClick.AddListener(() => { AddChildToContainer(); });
+                }
+            }
+            else
+            {
+                if (controller.inputField != null && applyButton != null)
+                {
+                    controller.inputField.onValueChanged.AddListener((value) => { });
+                }
+            }
+        }
+        else
+        {
+            Debug.LogError("OptionalAttributeRowController űδ " + rowObj.name);
+        }
+    }
+
+    private void OnNameChanged(string newText)
+    {
+        // ݣ޸applyť״̬
+    }
+
+    private void ApplyChanges()
+    {
+        if (!currentPlacedItem.HasValue || nameInputField == null)
+            return;
+
+        var updatedItem = currentPlacedItem.Value;
+        string newName = nameInputField.text.Trim();
+        updatedItem.item.itemName = newName;
+        currentPlacedItem = updatedItem;
+        originalName = newName;
+
+        Dictionary<string, string> newAttributes = new Dictionary<string, string>();
+        foreach (var pair in attributeRows)
+        {
+            string val = pair.Value.GetInputValue();
+            if (!string.IsNullOrEmpty(val))
+                newAttributes[pair.Key] = val;
+        }
+        if (updatedItem.item.attributes == null)
+            updatedItem.item.attributes = new Dictionary<string, string>();
+        updatedItem.item.attributes = newAttributes;
+        currentPlacedItem = updatedItem;
+
+        List<PlacedItem> list = MapManager.Instance.placedItems;
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (list[i].uniqueId == updatedItem.uniqueId)
+            {
+                list[i] = updatedItem;
+                break;
+            }
+        }
+        isApplied = true;
+        MapManager.Instance.isDirty = true;
+        Debug.Log($"Ʒ [{updatedItem.uniqueId}] ƸΪ: {newName},  {newAttributes.Count} ");
+    }
+
+    private void DeleteItem(PlacedItem placedItem)
+    {
+        //  Ʒ container ԣݹɾƷ
+        if (placedItem.item.attributes != null && placedItem.item.attributes.ContainsKey("container"))
+        {
+            string containerStr = placedItem.item.attributes["container"];
+            if (!string.IsNullOrEmpty(containerStr))
+            {
+                string[] childIds = containerStr.Split(',');
+                foreach (string childId in childIds)
+                {
+                    PlacedItem? child = MapManager.Instance.placedItems.Find(x => x.uniqueId == childId);
+                    if (child.HasValue)
+                    {
+                        DeleteItem(child.Value);
+                    }
+                }
+            }
+        }
+
+        //  ɾƷĸƷ container 
+        if (placedItem.gridX == -1 && placedItem.gridY == -1)
+        {
+            foreach (var pi in MapManager.Instance.placedItems)
+            {
+                if (pi.item.attributes != null && pi.item.attributes.ContainsKey("container"))
+                {
+                    string containerStr = pi.item.attributes["container"];
+                    List<string> ids = new List<string>(containerStr.Split(','));
+                    if (ids.Remove(placedItem.uniqueId))
+                    {
+                        string newContainer = string.Join(",", ids);
+                        pi.item.attributes["container"] = newContainer;
+
+                        // ǰʾǸĸƷǿؽ
+                        if (currentPlacedItem.HasValue && currentPlacedItem.Value.uniqueId == pi.uniqueId)
+                        {
+                            // նջȷʹþɵĵ
+                            popupStack.Clear();
+                            // رյǰ
+                            ClosePopup();
+                            // ´ȫлȡµĸƷ
+                            PlacedItem? latestParent = MapManager.Instance.placedItems.Find(x => x.uniqueId == pi.uniqueId);
+                            if (latestParent.HasValue)
+                            {
+                                ShowPopup(latestParent.Value);
+                                return; // ˢº˳ɾ
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        //  ɾƷ
+        MapManager.Instance.RemoveItem(placedItem.uniqueId);
+        //  رյǰɾƷǵǰʾĵ
+        ClosePopup();
+    }
+
+
+
+
+    private void ClosePopup()
+    {
+        if (currentPopup != null)
+        {
+            Destroy(currentPopup);
+            currentPopup = null;
+        }
+        if (popupStack.Count > 0)
+        {
+            currentPopup = popupStack.Pop();
+            currentPopup.SetActive(true);
+            if (popupStack.Count == 0)
+            {
+                SetCloseButtonText(currentPopup, "");
+            }
+        }
+        else
+        {
+            EnableMapOperations();
+        }
+        currentPlacedItem = null;
+    }
+
+    private void DisableMapOperations()
+    {
+        MapDragController mapDrag = FindObjectOfType<MapDragController>();
+        if (mapDrag != null) mapDrag.enabled = false;
+        BuildingPlacementController buildingPlacement = FindObjectOfType<BuildingPlacementController>();
+        if (buildingPlacement != null) buildingPlacement.enabled = false;
+        MapZoomController mapZoom = FindObjectOfType<MapZoomController>();
+        if (mapZoom != null) mapZoom.enabled = false;
+    }
+
+    private void EnableMapOperations()
+    {
+        MapDragController mapDrag = FindObjectOfType<MapDragController>();
+        if (mapDrag != null) mapDrag.enabled = true;
+        BuildingPlacementController buildingPlacement = FindObjectOfType<BuildingPlacementController>();
+        if (buildingPlacement != null) buildingPlacement.enabled = true;
+        MapZoomController mapZoom = FindObjectOfType<MapZoomController>();
+        if (mapZoom != null) mapZoom.enabled = true;
+    }
+
+    private void AddChildToContainer()
+    {
+        if (EditorManager.Instance.currentSelectedItem == null)
+        {
+            Debug.LogWarning("ڹѡҪӵƷ");
+            return;
+        }
+        EditorItem toolbarItem = EditorManager.Instance.currentSelectedItem;
+        string newChildUniqueId = System.Guid.NewGuid().ToString();
+        EditorItem childInstance = new EditorItem
+        {
+            uniqueId = newChildUniqueId,
+            typeId = toolbarItem.typeId,
+            itemName = toolbarItem.itemName,
+            gridWidth = toolbarItem.gridWidth,
+            gridHeight = toolbarItem.gridHeight,
+            category = toolbarItem.category,
+            thumbnail = toolbarItem.thumbnail,
+            attributes = new Dictionary<string, string>()
+        };
+        PlacedItem childPlacedItem = new PlacedItem
+        {
+            uniqueId = newChildUniqueId,
+            item = childInstance,
+            category = toolbarItem.category,
+            typeId = toolbarItem.typeId,
+            gridX = -1,
+            gridY = -1,
+            gridWidth = toolbarItem.gridWidth,
+            gridHeight = toolbarItem.gridHeight
+        };
+        MapManager.Instance.placedItems.Add(childPlacedItem);
+
+        if (!currentPlacedItem.HasValue)
+            return;
+        var updatedParent = currentPlacedItem.Value;
+        string existing = "";
+        if (updatedParent.item.attributes != null && updatedParent.item.attributes.ContainsKey("container"))
+            existing = updatedParent.item.attributes["container"];
+        if (!string.IsNullOrEmpty(existing))
+            updatedParent.item.attributes["container"] = existing + "," + newChildUniqueId;
+        else
+        {
+            if (updatedParent.item.attributes == null)
+                updatedParent.item.attributes = new Dictionary<string, string>();
+            updatedParent.item.attributes["container"] = newChildUniqueId;
+        }
+        currentPlacedItem = updatedParent;
+
+        if (attributeRows.ContainsKey("container"))
+        {
+            OptionalAttributeRowController containerRow = attributeRows["container"];
+            containerRow.AddChild(newChildUniqueId, childInstance.thumbnail);
+        }
+        EditorManager.Instance.SetSelectedItem(null);
+
+        Debug.Log($"Ʒ: {newChildUniqueId}  container꣺-1,-1");
+    }
+
+    public void OpenChildPopup(string childId)
+    {
+        if (currentPopup != null)
+        {
+            popupStack.Push(currentPopup);
+            currentPopup.SetActive(false);
+        }
+
+        PlacedItem? childItem = null;
+        foreach (var pi in MapManager.Instance.placedItems)
+        {
+            if (pi.uniqueId == childId)
+            {
+                childItem = pi;
+                break;
+            }
+        }
+        if (!childItem.HasValue)
+        {
+            Debug.LogWarning("δҵƷ: " + childId);
+            if (popupStack.Count > 0)
+            {
+                currentPopup = popupStack.Pop();
+                currentPopup.SetActive(true);
+            }
+            return;
+        }
+
+        currentPlacedItem = childItem;
+        originalName = childItem.Value.item.itemName;
+        originalAttributes = childItem.Value.item.attributes != null ?
+                             new Dictionary<string, string>(childItem.Value.item.attributes) :
+                             new Dictionary<string, string>();
+        isApplied = false;
+
+        GameObject childPopup = Instantiate(objectBuildingPopupPrefab, popupParent);
+        currentPopup = childPopup;
+        SetCloseButtonText(childPopup, "");
+
+        var closeButton = childPopup.transform.Find("CloseButton")?.GetComponent<Button>();
+        if (closeButton != null)
+        {
+            closeButton.onClick.AddListener(() =>
+            {
+                Destroy(childPopup);
+                if (popupStack.Count > 0)
+                {
+                    currentPopup = popupStack.Pop();
+                    currentPopup.SetActive(true);
+                    if (popupStack.Count == 0)
+                        SetCloseButtonText(currentPopup, "");
+                }
+                else
+                {
+                    EnableMapOperations();
+                }
+            });
+        }
+
+        var basicPanel = childPopup.transform.Find("Basic");
+        if (basicPanel != null)
+        {
+            var typeText = basicPanel.Find("TypeText")?.GetComponent<TMP_Text>();
+            if (typeText != null)
+                typeText.text = currentPlacedItem.Value.category.ToString();
+
+            nameInputField = basicPanel.Find("NameInputField")?.GetComponent<TMP_InputField>();
+            if (nameInputField != null)
+            {
+                nameInputField.text = originalName;
+                nameInputField.onValueChanged.AddListener(OnNameChanged);
+            }
+
+            var image = basicPanel.Find("Image")?.GetComponent<Image>();
+            if (image != null && currentPlacedItem.Value.item.thumbnail != null)
+            {
+                image.sprite = currentPlacedItem.Value.item.thumbnail;
+                float origW = currentPlacedItem.Value.item.thumbnail.rect.width;
+                float origH = currentPlacedItem.Value.item.thumbnail.rect.height;
+                float scaleFactor = Mathf.Min(100f / origW, 100f / origH, 1f);
+                image.rectTransform.sizeDelta = new Vector2(origW * scaleFactor, origH * scaleFactor);
+            }
+        }
+
+        applyButton = childPopup.transform.Find("ApplyButton")?.GetComponent<Button>();
+        if (applyButton != null)
+        {
+            applyButton.onClick.AddListener(ApplyChanges);
+        }
+
+        var deleteButton = childPopup.transform.Find("DeleteButton")?.GetComponent<Button>();
+        if (deleteButton != null)
+            deleteButton.onClick.AddListener(() => DeleteItem(currentPlacedItem.Value));
+
+        var attributesPanel = childPopup.transform.Find("AttributesPanel");
+        if (attributesPanel != null)
+        {
+            foreach (Transform child in attributesPanel)
+                Destroy(child.gameObject);
+            attributeRows.Clear();
+            foreach (string attrName in optionalAttributes)
+            {
+                bool enabled = false;
+                string defaultVal = "";
+                if (currentPlacedItem.Value.item.attributes != null && currentPlacedItem.Value.item.attributes.ContainsKey(attrName))
+                {
+                    enabled = true;
+                    defaultVal = currentPlacedItem.Value.item.attributes[attrName];
+                }
+                CreateOptionalAttributeRow(attrName, attributesPanel, enabled, defaultVal);
+            }
+        }
+
+        DisableMapOperations();
+    }
+}
+
+
+// 文件: RectTransformHelper.cs
+using UnityEngine;
+
+/// <summary>
+/// ࣺǿƽ RectTransform Ϊê= (0,0)-(0,0), pivot=(0,0), anchoredPos= (0,0)
+///  (0,0) ǸϽ
+/// </summary>
+public static class RectTransformHelper
+{
+    public static void SetToTopLeft(RectTransform rt)
+    {
+        if (rt == null) return;
+        rt.anchorMin = Vector2.zero;   // (0,0)
+        rt.anchorMax = Vector2.zero;   // (0,0)
+        rt.pivot = Vector2.zero;   // (0,0)
+        rt.anchoredPosition = Vector2.zero;
+    }
+}
+
+
+// 文件: SimulationAgent.cs
+using UnityEngine;
+
+[System.Serializable]
+public class SimulationAgent
+{
+    public string name;
+    public string activity;
+    public string location;
+    public int[] curr_tile;
+    public string walkingSpriteSheetName; // ͼͼƣ "adam_hi"
+}
+
+
+// 文件: SimulationAgentRenderer.cs
+using UnityEngine;
+using UnityEngine.UI;
+using System.Collections.Generic;
+using System.Linq;
+
+[System.Serializable]
+public class AgentStyle
+{
+    //  agent ɫ
+    public Color color = Color.white;
+}
+
+public class SimulationAgentRenderer : MonoBehaviour
+{
+    [Header("")]
+    public float gridSize = 32f; // ÿӵԭʼߴ
+
+    [Header("Agent ʽ")]
+    [Tooltip("һ Agent ɫĸ˳ agent agent  agent ʹõһɫΪĬɫ")]
+    public List<AgentStyle> agentStyles = new List<AgentStyle>();
+
+    public AgentStyle defaultAgentStyle;
+
+    // ڲɵ agent UI Image key Ϊ agent 
+    private Dictionary<string, Image> agentImages = new Dictionary<string, Image>();
+
+    // ÿ agent Ķkey Ϊ agent 
+    private Dictionary<string, AgentAnimationController> agentAnimControllers = new Dictionary<string, AgentAnimationController>();
+
+    private RectTransform containerRect;
+
+    private void Awake()
+    {
+        containerRect = GetComponent<RectTransform>();
+        if (containerRect == null)
+        {
+            Debug.LogError("SimulationAgentRenderer: ޷ȡ RectTransform");
+        }
+    }
+
+    /// <summary>
+    /// ݴ step ݣڵͼϳȾ agent
+    /// </summary>
+    public void RenderAgents(Dictionary<string, SimulationAgent> stepData)
+    {
+        ClearAgents();
+
+        List<string> agentNames = stepData.Keys.ToList();
+        agentNames.Sort();
+
+        float factor = 1f;
+        if (SimulationMapManager.Instance != null)
+            factor = SimulationMapManager.Instance.backgroundScaleFactor;
+        else
+            Debug.LogWarning("δҵ SimulationMapManager.InstanceĬ factor=1");
+
+        for (int i = 0; i < agentNames.Count; i++)
+        {
+            string agentName = agentNames[i];
+            SimulationAgent agentData = stepData[agentName];
+
+            // ԭʼλã * gridSize
+            Vector2 rawPos = Vector2.zero;
+            if (agentData.curr_tile != null && agentData.curr_tile.Length >= 2)
+                rawPos = new Vector2(agentData.curr_tile[0] * gridSize, agentData.curr_tile[1] * gridSize);
+            // תΪ UI ꣺X 䣬Y ȡUI Y ϣ
+            Vector2 pos = new Vector2(rawPos.x * factor, -rawPos.y * factor);
+
+            // ɫ˳
+            AgentStyle style = defaultAgentStyle;
+            if (agentStyles != null && agentStyles.Count > 0)
+            {
+                if (i < agentStyles.Count)
+                    style = agentStyles[i];
+                else
+                    style = agentStyles[0];
+            }
+
+            //  UI Image ʾ agent
+            GameObject go = new GameObject("Agent_" + agentName, typeof(Image));
+            go.transform.SetParent(containerRect, false);
+            Image img = go.GetComponent<Image>();
+            //  sprite AgentAnimationController ͼͼ
+            img.color = style.color;
+            img.rectTransform.pivot = new Vector2(0, 1);
+            img.rectTransform.sizeDelta = new Vector2(gridSize * factor, gridSize * factor);
+            img.rectTransform.anchoredPosition = pos;
+            agentImages.Add(agentName, img);
+
+            //  AgentAnimationController ʼ spriteSheetName
+            AgentAnimationController anim = go.AddComponent<AgentAnimationController>();
+            if (!string.IsNullOrEmpty(agentData.walkingSpriteSheetName))
+                anim.spriteSheetName = agentData.walkingSpriteSheetName;
+            else
+                anim.spriteSheetName = agentName;
+            agentAnimControllers.Add(agentName, anim);
+
+            //  óʼΪ idle ״̬ idle idle ֡1
+            anim.UpdateAnimation(AgentAnimationController.Direction.Down, false, 0f);
+        }
+    }
+
+    /// <summary>
+    ///  agent λã´Ҳ޸Ķ״̬ AgentAnimationController ƣ
+    /// </summary>
+    public void UpdateAgentsPositions(Dictionary<string, SimulationAgent> stepData)
+    {
+        float factor = 1f;
+        if (SimulationMapManager.Instance != null)
+            factor = SimulationMapManager.Instance.backgroundScaleFactor;
+        foreach (var kvp in stepData)
+        {
+            string agentName = kvp.Key;
+            SimulationAgent agentData = kvp.Value;
+            Vector2 rawPos = Vector2.zero;
+            if (agentData.curr_tile != null && agentData.curr_tile.Length >= 2)
+                rawPos = new Vector2(agentData.curr_tile[0] * gridSize, agentData.curr_tile[1] * gridSize);
+            Vector2 pos = new Vector2(rawPos.x * factor, -rawPos.y * factor);
+            UpdateAgentPosition(agentName, pos);
+        }
+    }
+
+    public void ClearAgents()
+    {
+        foreach (var kvp in agentImages)
+        {
+            if (kvp.Value != null)
+                Destroy(kvp.Value.gameObject);
+        }
+        agentImages.Clear();
+        agentAnimControllers.Clear();
+    }
+
+    public void UpdateAgentPosition(string agentName, Vector2 pos)
+    {
+        if (agentImages.ContainsKey(agentName))
+            agentImages[agentName].rectTransform.anchoredPosition = pos;
+    }
+
+    public Vector2 GetAgentPosition(string agentName)
+    {
+        if (agentImages.ContainsKey(agentName))
+            return agentImages[agentName].rectTransform.anchoredPosition;
+        return Vector2.zero;
+    }
+
+    public AgentAnimationController GetAnimationController(string agentName)
+    {
+        if (agentAnimControllers.ContainsKey(agentName))
+            return agentAnimControllers[agentName];
+        return null;
+    }
+}
+
+
+// 文件: SimulationAgentTest.cs
+using UnityEngine;
+using System.Collections.Generic;
+
+public class SimulationAgentTest : MonoBehaviour
+{
+    // 뽫 SimulationAgentRenderer űĶͨ mapContent ϣֶ
+    public SimulationAgentRenderer agentRenderer;
+
+    void Start()
+    {
+        // Զȡ sim ļ·ʹ GameManager.Instance.simPathʹĬ·
+        string simFolderPath = "";
+        if (GameManager.Instance != null && !string.IsNullOrEmpty(GameManager.Instance.simPath))
+        {
+            simFolderPath = GameManager.Instance.simPath;
+        }
+        else
+        {
+            simFolderPath = System.IO.Path.Combine(Application.dataPath, "Sim");
+        }
+        Debug.Log("ʹõ sim ļ·: " + simFolderPath);
+
+        // ʹ SimulationDataReader ȡ step 
+        SimulationDataReader reader = new SimulationDataReader();
+        List<Dictionary<string, SimulationAgent>> steps = reader.ReadAllSteps(simFolderPath);
+        if (steps.Count > 0)
+        {
+            // ʹõһݽȾ
+            agentRenderer.RenderAgents(steps[0]);
+        }
+        else
+        {
+            Debug.LogWarning("δȡκ step ݣ");
+        }
+    }
+}
+
+
+// 文件: SimulationDataReader.cs
+using UnityEngine;
+using System.Collections.Generic;
+using System.IO;
+using Newtonsoft.Json;  // ȷѵ Newtonsoft.Json
+using System;
+
+public class SimulationDataReader
+{
+    /// <summary>
+    /// ȡָ· JSON ļļʱÿ step  agent ݣͬʱȱʧϢвȫ
+    /// </summary>
+    /// <param name="simFolderPath">sim ļ·</param>
+    /// <returns>ListÿԪΪһʱ䲽ݣΪ Dictionary&lt;string, SimulationAgent&gt;</returns>
+    public List<Dictionary<string, SimulationAgent>> ReadAllSteps(string simFolderPath)
+    {
+        List<Dictionary<string, SimulationAgent>> steps = new List<Dictionary<string, SimulationAgent>>();
+
+        if (!Directory.Exists(simFolderPath))
+        {
+            Debug.LogError("sim ļв: " + simFolderPath);
+            return steps;
+        }
+
+        // ȡ .json ļ
+        string[] jsonFiles = Directory.GetFiles(simFolderPath, "*.json");
+
+        // ļ򣺸ļȡʱ䣨תΪ24Сʱƣ
+        Array.Sort(jsonFiles, (file1, file2) => {
+            DateTime time1 = ParseTimeFromFileName(Path.GetFileNameWithoutExtension(file1));
+            DateTime time2 = ParseTimeFromFileName(Path.GetFileNameWithoutExtension(file2));
+            return time1.CompareTo(time2);
+        });
+
+        Dictionary<string, SimulationAgent> previousStep = null;
+
+        int stepIndex = 0;
+        foreach (string file in jsonFiles)
+        {
+            string json = File.ReadAllText(file);
+            try
+            {
+                Dictionary<string, SimulationAgent> stepData = JsonConvert.DeserializeObject<Dictionary<string, SimulationAgent>>(json);
+                if (stepData == null)
+                {
+                    Debug.LogWarning(" " + file + " Ϊ");
+                    continue;
+                }
+
+                // ȱʧ agent Ϣһʱ䲽ݲȫ
+                if (previousStep != null)
+                {
+                    foreach (var kvp in previousStep)
+                    {
+                        if (!stepData.ContainsKey(kvp.Key))
+                        {
+                            stepData[kvp.Key] = kvp.Value;
+                        }
+                    }
+                }
+
+                steps.Add(stepData);
+                previousStep = stepData;
+
+                // Ϣʾ step šʱԼÿ agent  curr_tile
+                DateTime stepTime = ParseTimeFromFileName(Path.GetFileNameWithoutExtension(file));
+                string debugOutput = $"Step {stepIndex} {stepTime.ToString("HH:mm:ss")}\n";
+                foreach (var agentKvp in stepData)
+                {
+                    string agentName = agentKvp.Key;
+                    SimulationAgent agent = agentKvp.Value;
+                    string pos = "";
+                    if (agent.curr_tile != null && agent.curr_tile.Length >= 2)
+                    {
+                        pos = $"[{agent.curr_tile[0]},{agent.curr_tile[1]}]";
+                    }
+                    debugOutput += $"{agentName}: {pos}\n";
+                }
+                Debug.Log(debugOutput);
+
+                stepIndex++;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError("ļ " + file + " 쳣: " + ex.Message);
+            }
+        }
+        return steps;
+    }
+
+    /// <summary>
+    /// ļнʱϢļʽʾ"06_00_00 am"  "01_00_00 pm"
+    /// </summary>
+    /// <param name="fileNameWithoutExtension">ļչ</param>
+    /// <returns>תΪ DateTime ͣڲĬΪ죩</returns>
+    private DateTime ParseTimeFromFileName(string fileNameWithoutExtension)
+    {
+        // ļʽΪ "HH_MM_SS am"  "HH_MM_SS pm"
+        // Ȱո
+        string[] parts = fileNameWithoutExtension.Split(' ');
+        if (parts.Length < 2)
+        {
+            Debug.LogWarning("ļʽ: " + fileNameWithoutExtension);
+            return DateTime.Today;
+        }
+        string timePart = parts[0]; // "HH_MM_SS"
+        string period = parts[1].ToLower(); // "am"  "pm"
+
+        string[] timeParts = timePart.Split('_');
+        if (timeParts.Length < 3)
+        {
+            Debug.LogWarning("ʱʽ: " + timePart);
+            return DateTime.Today;
+        }
+        int hour = int.Parse(timeParts[0]);
+        int minute = int.Parse(timeParts[1]);
+        int second = int.Parse(timeParts[2]);
+
+        //  period תΪ24Сʱ
+        if (period == "pm" && hour < 12)
+        {
+            hour += 12;
+        }
+        else if (period == "am" && hour == 12)
+        {
+            hour = 0;
+        }
+
+        DateTime dt = new DateTime(DateTime.Today.Year, DateTime.Today.Month, DateTime.Today.Day, hour, minute, second);
+        return dt;
+    }
+}
+
+
+// 文件: SimulationDataReaderTest.cs
+using UnityEngine;
+using System.Collections.Generic;
+
+public class SimulationDataReaderTest : MonoBehaviour
+{
+    void Start()
+    {
+        // Զʹ GameManager.Instance.simPath Ĭ·
+        string simFolderPath = "";
+        if (GameManager.Instance != null && !string.IsNullOrEmpty(GameManager.Instance.simPath))
+        {
+            simFolderPath = GameManager.Instance.simPath;
+        }
+        else
+        {
+            simFolderPath = System.IO.Path.Combine(Application.dataPath, "Sim");
+        }
+        Debug.Log("ʹõ sim ļ·: " + simFolderPath);
+
+        SimulationDataReader reader = new SimulationDataReader();
+        List<Dictionary<string, SimulationAgent>> steps = reader.ReadAllSteps(simFolderPath);
+    }
+}
+
+
+// 文件: SimulationItemCreator.cs
+using UnityEngine;
+using UnityEngine.UI;
+
+public static class SimulationItemCreator
+{
+    /// <summary>
+    /// ָ mapContent ´һʵ󶨵¼
+    /// </summary>
+    /// <param name="item">Ʒ</param>
+    /// <param name="gridX"> X ꣨λӣ</param>
+    /// <param name="gridY"> Y ꣨λӣ</param>
+    /// <param name="cat">Ʒ</param>
+    /// <param name="mapContent"></param>
+    public static void CreateItemInstance(EditorItem item, int gridX, int gridY, EditorItemCategory cat, RectTransform mapContent)
+    {
+        // ȡӣ SimulationMapManager.Instance ѳʼ
+        float factor = (SimulationMapManager.Instance != null) ? SimulationMapManager.Instance.backgroundScaleFactor : 1f;
+        // ̶ÿӳߴΪ32
+        float gridSize = 32f;
+        Vector2 pos = new Vector2(gridX * gridSize * factor, -gridY * gridSize * factor);
+
+        GameObject go = new GameObject($"{cat}_Loaded", typeof(Image));
+        go.transform.SetParent(mapContent, false);
+        Image img = go.GetComponent<Image>();
+        img.sprite = item.thumbnail;
+        RectTransform rt = img.rectTransform;
+        rt.sizeDelta = new Vector2(item.gridWidth * gridSize * factor, item.gridHeight * gridSize * factor);
+        rt.pivot = new Vector2(0, 1);
+        rt.anchorMin = new Vector2(0, 1);
+        rt.anchorMax = new Vector2(0, 1);
+        rt.anchoredPosition = pos;
+        // ˴󶨵¼Ϊ simulation չʾ
+        go.name = item.uniqueId;
+    }
+}
+
+
+// 文件: SimulationMapManager.cs
+using UnityEngine;
+using UnityEngine.UI;
+using System.IO;
+
+public class SimulationMapManager : MonoBehaviour
+{
+    public static SimulationMapManager Instance;
+
+    [Header("ͼʾ")]
+    public RectTransform mapDisplayArea; // ʾͼ
+
+    [Header("ͼ")]
+    public RectTransform mapContent;     // ͼ Agent ĸ
+
+    [Header("ͼͼļ")]
+    public string mapTextureFileName = "texture.png";
+
+    [Header("ͼ Image")]
+    // δãᶯ̬
+    public Image mapImage;
+
+    [Header("ͼļ")]
+    public string mapFolder; // δã GameManager.Instance.resourcePath ȡ
+
+    [HideInInspector]
+    public float backgroundScaleFactor = 0.1406f; // õĵͼ
+
+    private void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+            // ԸҪ DontDestroyOnLoad(gameObject);
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
+
+    private void Start()
+    {
+        if (string.IsNullOrEmpty(mapFolder))
+        {
+            if (GameManager.Instance != null)
+                mapFolder = GameManager.Instance.resourcePath;
+            else
+                Debug.LogError("δõͼļδҵ GameManager");
+        }
+        LoadMapBackground();
+    }
+
+    /// <summary>
+    /// ӵͼļмرͼ mapDisplayArea ӣȻͼʾ mapContent С
+    /// </summary>
+    public void LoadMapBackground()
+    {
+        string actualMapFolder = Path.Combine(mapFolder, "map");
+        string texturePath = Path.Combine(actualMapFolder, mapTextureFileName);
+
+        if (!File.Exists(texturePath))
+        {
+            Debug.LogWarning("δҵͼͼ: " + texturePath);
+            return;
+        }
+
+        byte[] imgData = File.ReadAllBytes(texturePath);
+        Texture2D tex = new Texture2D(2, 2);
+        if (!tex.LoadImage(imgData))
+        {
+            Debug.LogError("صͼͼʧ: " + texturePath);
+            return;
+        }
+
+        Sprite sp = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+
+        //  mapImage δã̬һ
+        if (mapImage == null)
+        {
+            GameObject go = new GameObject("MapImage", typeof(Image));
+            go.transform.SetParent(mapContent, false);
+            mapImage = go.GetComponent<Image>();
+        }
+        mapImage.sprite = sp;
+
+        // ؼ mapImage  pivot ΪϽǣ0,1ȷ (0,0) ΪϽ
+        mapImage.rectTransform.pivot = new Vector2(0, 1);
+        mapImage.rectTransform.anchoredPosition = Vector2.zero;
+
+        //  mapDisplayArea ĳߴ
+        float panelW = mapDisplayArea.rect.width;
+        float panelH = mapDisplayArea.rect.height;
+        backgroundScaleFactor = Mathf.Min(panelW / tex.width, panelH / tex.height, 1f);
+        Vector2 newSize = new Vector2(tex.width * backgroundScaleFactor, tex.height * backgroundScaleFactor);
+        mapImage.rectTransform.sizeDelta = newSize;
+
+        // ͼײ
+        mapImage.transform.SetSiblingIndex(0);
+
+        Debug.Log($"ɹصͼͼԭʼߴ {tex.width}x{tex.height}źߴ {newSize.x}x{newSize.y}");
+    }
+}
+
+
+// 文件: SimulationMapRenderer.cs
+using UnityEngine;
+using System.IO;
+
+public class SimulationMapRenderer : MonoBehaviour
+{
+    [Header("Դļ")]
+    // δãԶ GameManager.Instance.resourcePath ȡ
+    public string mapFolder;
+
+    [Header("")]
+    public RectTransform mapContent;  // ʾĸ
+
+    private void Start()
+    {
+        if (string.IsNullOrEmpty(mapFolder))
+        {
+            if (GameManager.Instance != null)
+                mapFolder = GameManager.Instance.resourcePath;
+            else
+                Debug.LogError("δ mapFolder δҵ GameManager");
+        }
+        LoadBuildingsAndObjects();
+    }
+
+    private void LoadBuildingsAndObjects()
+    {
+        // Ͷļ map ļͬ
+        string buildingDirectory = Path.Combine(mapFolder, "buildings");
+        Debug.Log("Ŀ¼: " + buildingDirectory);
+        if (Directory.Exists(buildingDirectory))
+        {
+            string[] buildingFolders = Directory.GetDirectories(buildingDirectory);
+            foreach (string folder in buildingFolders)
+            {
+                string folderName = Path.GetFileName(folder);
+                string jsonPath = Path.Combine(folder, "maze_meta_info.json");
+                if (File.Exists(jsonPath))
+                {
+                    string jsonText = File.ReadAllText(jsonPath);
+                    MazeMetaInfo meta = JsonUtility.FromJson<MazeMetaInfo>(jsonText);
+                    EditorItem newItem = new EditorItem();
+                    newItem.typeId = meta.typeId;
+                    newItem.itemName = folderName;  //  meta.world_name
+                    newItem.gridWidth = meta.maze_width;
+                    newItem.gridHeight = meta.maze_height;
+                    newItem.category = EditorItemCategory.Building;
+                    // ʹù̶ͼ "texture.png"
+                    string pngPath = Path.Combine(folder, "texture.png");
+                    newItem.thumbnail = LoadSpriteFromFile(pngPath);
+                    // ʾнλù̶Ϊ (0,0)ʵ
+                    SimulationItemCreator.CreateItemInstance(newItem, 0, 0, EditorItemCategory.Building, mapContent);
+                }
+            }
+        }
+        else
+        {
+            Debug.LogWarning("ļв: " + buildingDirectory);
+        }
+
+        string objectDirectory = Path.Combine(mapFolder, "objects");
+        Debug.Log("Ŀ¼: " + objectDirectory);
+        if (Directory.Exists(objectDirectory))
+        {
+            string[] objectFolders = Directory.GetDirectories(objectDirectory);
+            foreach (string folder in objectFolders)
+            {
+                string folderName = Path.GetFileName(folder);
+                string jsonPath = Path.Combine(folder, "maze_meta_info.json");
+                if (File.Exists(jsonPath))
+                {
+                    string jsonText = File.ReadAllText(jsonPath);
+                    MazeMetaInfo meta = JsonUtility.FromJson<MazeMetaInfo>(jsonText);
+                    EditorItem newItem = new EditorItem();
+                    newItem.typeId = meta.typeId;
+                    newItem.itemName = folderName;
+                    newItem.gridWidth = meta.maze_width;
+                    newItem.gridHeight = meta.maze_height;
+                    newItem.category = EditorItemCategory.Object;
+                    string pngPath = Path.Combine(folder, "texture.png");
+                    newItem.thumbnail = LoadSpriteFromFile(pngPath);
+                    // λͬʾΪ (0,0)Ҫ
+                    SimulationItemCreator.CreateItemInstance(newItem, 0, 0, EditorItemCategory.Object, mapContent);
+                }
+            }
+        }
+        else
+        {
+            Debug.LogWarning("ļв: " + objectDirectory);
+        }
+    }
+
+    private Sprite LoadSpriteFromFile(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            Debug.LogWarning("ļ: " + filePath);
+            return null;
+        }
+        byte[] fileData = File.ReadAllBytes(filePath);
+        Texture2D tex = new Texture2D(2, 2);
+        if (tex.LoadImage(fileData))
+            return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+        return null;
+    }
+}
+
+
+// 文件: SimulationPlaybackController.cs
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using System.Collections;
+using System.Collections.Generic;
+
+public class SimulationPlaybackController : MonoBehaviour
+{
+    [Header("ſ UI")]
+    public Button playButton;
+    public Button pauseButton;
+    public Button jumpButton;
+    public TMP_Dropdown speedDropdown; // ѡ1x,2x,4x,8x
+    public TMP_InputField jumpStepInput; // ʾ/Ŀ step
+
+    [Header("Agent Ⱦ")]
+    public SimulationAgentRenderer agentRenderer; //  mapContent 
+
+    [Header("Ų")]
+    public float baseStepDuration = 1f;
+
+    [Header("")]
+    public string simFolderPath; // Զ GameManager.Instance.simPath Ĭ·ȡ
+
+    [Header("첽")]
+    public LoadingPanelController loadingPanel; // 볡 LoadingPanel Ŀƽű
+    public AsyncSimulationDataLoader dataLoader;  //  AsyncSimulationDataLoader 
+
+    private List<Dictionary<string, SimulationAgent>> simulationSteps;
+    private int currentStepIndex = 0;
+    private Coroutine playbackCoroutine;
+    private bool isPaused = false;
+    private float speedMultiplier = 1f;
+
+    private int gridWidth = 0;
+    private int gridHeight = 0;
+
+    private void Start()
+    {
+        Time.timeScale = 1f;
+
+        // ʾ Loading Panel
+        if (loadingPanel != null)
+            loadingPanel.Show();
+
+        // Զȡ simFolderPath
+        if (string.IsNullOrEmpty(simFolderPath))
+        {
+            if (GameManager.Instance != null && !string.IsNullOrEmpty(GameManager.Instance.simPath))
+                simFolderPath = GameManager.Instance.simPath;
+            else
+                simFolderPath = System.IO.Path.Combine(Application.dataPath, "Sim");
+        }
+        Debug.Log("ʹõ sim ļ·: " + simFolderPath);
+
+        // 첽ݼ
+        if (dataLoader != null)
+        {
+            dataLoader.simFolderPath = simFolderPath;
+            dataLoader.OnDataLoaded += OnDataLoaded;
+        }
+        else
+        {
+            Debug.LogError("δҵ AsyncSimulationDataLoader ");
+        }
+    }
+
+    private void OnDataLoaded()
+    {
+        // ݼɺ Loading Panel
+        if (loadingPanel != null)
+            loadingPanel.Hide();
+
+        simulationSteps = dataLoader.simulationSteps;
+        if (simulationSteps == null || simulationSteps.Count == 0)
+        {
+            Debug.LogError("ݼغ simulationSteps Ϊգ");
+            return;
+        }
+        currentStepIndex = 0;
+        agentRenderer.RenderAgents(simulationSteps[currentStepIndex]);
+        jumpStepInput.text = currentStepIndex.ToString();
+
+        if (SimulationMapManager.Instance != null && SimulationMapManager.Instance.mapImage != null)
+        {
+            Vector2 mapSize = SimulationMapManager.Instance.mapImage.rectTransform.sizeDelta;
+            float factor = SimulationMapManager.Instance.backgroundScaleFactor;
+            float origWidth = mapSize.x / factor;
+            float origHeight = mapSize.y / factor;
+            gridWidth = Mathf.FloorToInt(origWidth / agentRenderer.gridSize);
+            gridHeight = Mathf.FloorToInt(origHeight / agentRenderer.gridSize);
+            Debug.Log($"Χ: {gridWidth} x {gridHeight}");
+        }
+
+        if (playButton != null)
+            playButton.onClick.AddListener(OnPlayButtonClicked);
+        if (pauseButton != null)
+            pauseButton.onClick.AddListener(OnPauseButtonClicked);
+        if (jumpButton != null)
+            jumpButton.onClick.AddListener(OnJumpButtonClicked);
+        if (speedDropdown != null)
+            speedDropdown.onValueChanged.AddListener(OnSpeedChanged);
+
+        SetPlayPauseInteractable(true, false);
+        SetJumpUIInteractable(false);
+    }
+
+    private void Update()
+    {
+        if (!isPaused)
+        {
+            jumpStepInput.text = currentStepIndex.ToString();
+            SetJumpUIInteractable(false);
+        }
+    }
+
+    #region UI 
+    private void OnPlayButtonClicked()
+    {
+        if (playbackCoroutine == null)
+        {
+            isPaused = false;
+            SetPlayPauseInteractable(false, true);
+            SetJumpUIInteractable(false);
+            playbackCoroutine = StartCoroutine(PlaybackCoroutine());
+        }
+    }
+
+    private void OnPauseButtonClicked()
+    {
+        isPaused = true;
+        if (playbackCoroutine != null)
+        {
+            StopCoroutine(playbackCoroutine);
+            playbackCoroutine = null;
+        }
+        agentRenderer.UpdateAgentsPositions(simulationSteps[currentStepIndex]);
+        SetPlayPauseInteractable(true, false);
+        SetJumpUIInteractable(true);
+        ForceAgentsIdle();
+    }
+
+    private void OnSpeedChanged(int index)
+    {
+        switch (index)
+        {
+            case 0: speedMultiplier = 1f; break;
+            case 1: speedMultiplier = 2f; break;
+            case 2: speedMultiplier = 4f; break;
+            case 3: speedMultiplier = 8f; break;
+            default: speedMultiplier = 1f; break;
+        }
+        Debug.Log("Ϊ: " + speedMultiplier + "x");
+    }
+
+    private void OnJumpButtonClicked()
+    {
+        int targetStep;
+        if (int.TryParse(jumpStepInput.text, out targetStep))
+        {
+            targetStep = Mathf.Clamp(targetStep, 0, simulationSteps.Count - 1);
+            currentStepIndex = targetStep;
+            Debug.Log(": " + currentStepIndex);
+            agentRenderer.UpdateAgentsPositions(simulationSteps[currentStepIndex]);
+        }
+        else
+        {
+            Debug.LogWarning("Ч");
+        }
+    }
+
+    private void SetPlayPauseInteractable(bool playEnabled, bool pauseEnabled)
+    {
+        if (playButton != null) playButton.interactable = playEnabled;
+        if (pauseButton != null) pauseButton.interactable = pauseEnabled;
+    }
+
+    private void SetJumpUIInteractable(bool interactable)
+    {
+        if (jumpButton != null) jumpButton.interactable = interactable;
+        if (jumpStepInput != null) jumpStepInput.interactable = interactable;
+    }
+    #endregion
+
+    #region ŶЭ
+    private IEnumerator PlaybackCoroutine()
+    {
+        while (currentStepIndex < simulationSteps.Count - 1)
+        {
+            Dictionary<string, SimulationAgent> fromStep = simulationSteps[currentStepIndex];
+            Dictionary<string, SimulationAgent> toStep = simulationSteps[currentStepIndex + 1];
+            float stepDuration = baseStepDuration / speedMultiplier;
+            Debug.Log($" step {currentStepIndex}  {currentStepIndex + 1} ʼʱ: {stepDuration} ");
+
+            yield return StartCoroutine(AnimateStep(fromStep, toStep, stepDuration));
+
+            currentStepIndex++;
+            Debug.Log("ɣǰ step: " + currentStepIndex);
+            agentRenderer.UpdateAgentsPositions(simulationSteps[currentStepIndex]);
+
+            while (isPaused)
+                yield return null;
+        }
+        Debug.Log("Ž");
+        playbackCoroutine = null;
+    }
+
+    private IEnumerator AnimateStep(Dictionary<string, SimulationAgent> fromStep, Dictionary<string, SimulationAgent> toStep, float duration)
+    {
+        float factor = (SimulationMapManager.Instance != null) ? SimulationMapManager.Instance.backgroundScaleFactor : 1f;
+        Debug.Log("AnimateStep: ʹñ: " + factor);
+
+        Dictionary<string, List<Vector2>> agentPaths = new Dictionary<string, List<Vector2>>();
+        foreach (var kvp in fromStep)
+        {
+            string name = kvp.Key;
+            Vector2Int startGrid = new Vector2Int(kvp.Value.curr_tile[0], kvp.Value.curr_tile[1]);
+            Vector2Int targetGrid = new Vector2Int(toStep[name].curr_tile[0], toStep[name].curr_tile[1]);
+            List<Vector2Int> gridPath = AStarPathfinder.GetPath(startGrid, targetGrid, gridWidth, gridHeight);
+            List<Vector2> worldPath = new List<Vector2>();
+            foreach (var grid in gridPath)
+            {
+                Vector2 pos = new Vector2(grid.x * agentRenderer.gridSize * factor, -grid.y * agentRenderer.gridSize * factor);
+                worldPath.Add(pos);
+            }
+            List<Vector2> subdividedPath = new List<Vector2>();
+            int subdivisions = 10;
+            if (worldPath.Count > 0)
+            {
+                subdividedPath.Add(worldPath[0]);
+                for (int i = 0; i < worldPath.Count - 1; i++)
+                {
+                    Vector2 p0 = worldPath[i];
+                    Vector2 p1 = worldPath[i + 1];
+                    for (int s = 1; s < subdivisions; s++)
+                    {
+                        float t = s / (float)subdivisions;
+                        subdividedPath.Add(Vector2.Lerp(p0, p1, t));
+                    }
+                    subdividedPath.Add(p1);
+                }
+            }
+            agentPaths[name] = subdividedPath;
+            Debug.Log($"Agent {name}: ԭ·ڵ: {gridPath.Count}ϸֺڵ: {subdividedPath.Count}");
+        }
+
+        int maxPathLength = 0;
+        foreach (var path in agentPaths.Values)
+        {
+            if (path.Count > maxPathLength)
+                maxPathLength = path.Count;
+        }
+        Debug.Log("ϸ·: " + maxPathLength);
+        if (maxPathLength <= 1)
+        {
+            Debug.Log(" agent ƶȴ " + duration + " ");
+            yield return new WaitForSeconds(duration);
+            yield break;
+        }
+        float segmentDuration = duration / (maxPathLength - 1);
+        Debug.Log("ÿζʱ: " + segmentDuration + " ");
+
+        for (int segment = 0; segment < maxPathLength - 1; segment++)
+        {
+            float elapsed = 0f;
+            while (elapsed < segmentDuration)
+            {
+                float t = elapsed / segmentDuration;
+                foreach (var kvp in agentPaths)
+                {
+                    string name = kvp.Key;
+                    List<Vector2> path = kvp.Value;
+                    Vector2 fromPos = (segment < path.Count) ? path[segment] : path[path.Count - 1];
+                    Vector2 toPos = (segment + 1 < path.Count) ? path[segment + 1] : path[path.Count - 1];
+                    Vector2 newPos = Vector2.Lerp(fromPos, toPos, Mathf.Clamp01(t));
+                    agentRenderer.UpdateAgentPosition(name, newPos);
+
+                    bool moving = (toPos - fromPos).magnitude > 0.1f;
+                    AgentAnimationController.Direction animDir = AgentAnimationController.Direction.Down;
+                    if (moving)
+                    {
+                        if (Mathf.Abs(toPos.x - fromPos.x) >= Mathf.Abs(toPos.y - fromPos.y))
+                            animDir = (toPos.x - fromPos.x > 0) ? AgentAnimationController.Direction.Right : AgentAnimationController.Direction.Left;
+                        else
+                            animDir = (toPos.y - fromPos.y > 0) ? AgentAnimationController.Direction.Up : AgentAnimationController.Direction.Down;
+                    }
+                    AgentAnimationController animCtrl = agentRenderer.GetAnimationController(name);
+                    if (animCtrl != null)
+                        animCtrl.UpdateAnimation(animDir, moving, Time.deltaTime);
+                }
+                elapsed += Time.deltaTime;
+                yield return null;
+            }
+        }
+        // ǿ agent Ϊ idle ״̬
+        foreach (var kvp in agentPaths)
+        {
+            string name = kvp.Key;
+            List<Vector2> path = kvp.Value;
+            Vector2 lastMovement = Vector2.zero;
+            if (path.Count >= 2)
+                lastMovement = path[path.Count - 1] - path[path.Count - 2];
+            AgentAnimationController.Direction idleDir = AgentAnimationController.Direction.Down;
+            if (lastMovement.magnitude > 0.1f)
+            {
+                if (Mathf.Abs(lastMovement.x) >= Mathf.Abs(lastMovement.y))
+                    idleDir = (lastMovement.x > 0) ? AgentAnimationController.Direction.Right : AgentAnimationController.Direction.Left;
+                else
+                    idleDir = (lastMovement.y > 0) ? AgentAnimationController.Direction.Up : AgentAnimationController.Direction.Down;
+            }
+            AgentAnimationController animCtrl = agentRenderer.GetAnimationController(name);
+            if (animCtrl != null)
+                animCtrl.UpdateAnimation(idleDir, false, 0f);
+        }
+    }
+    #endregion
+
+    private void ForceAgentsIdle()
+    {
+        foreach (var kvp in simulationSteps[currentStepIndex])
+        {
+            string name = kvp.Key;
+            AgentAnimationController animCtrl = agentRenderer.GetAnimationController(name);
+            if (animCtrl != null)
+                animCtrl.UpdateAnimation(AgentAnimationController.Direction.Down, false, 0f);
+        }
+    }
+}
+
+
+// 文件: StartupManager.cs
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using UnityEngine.SceneManagement;
+using System.Collections;
+
+public class StartupManager : MonoBehaviour
+{
+    [Header("")]
+    public TMP_InputField mapFolderInput;   // ͼļеַ
+    public TMP_InputField simFolderInput;     // Simulation ļеַ
+
+    [Header("ť")]
+    public Button mapEditorButton;            // ͼ༭ť
+    public Button simulationButton;           //  Simulation ģ鰴ť
+
+    private void Start()
+    {
+        // Ϊť󶨵¼
+        if (mapEditorButton != null)
+            mapEditorButton.onClick.AddListener(OnMapEditorButtonClicked);
+        if (simulationButton != null)
+            simulationButton.onClick.AddListener(OnSimulationButtonClicked);
+    }
+
+    // ͼ༭ť¼
+    private void OnMapEditorButtonClicked()
+    {
+        string mapFolder = mapFolderInput.text.Trim();
+        if (string.IsNullOrEmpty(mapFolder))
+        {
+            Debug.LogWarning("ͼļеַΪգ");
+            return;
+        }
+        GameManager.Instance.resourcePath = mapFolder;
+        Debug.Log("ͼļеַΪ" + mapFolder);
+        SceneManager.LoadScene("EditingPage");
+    }
+
+    // Simulation ť¼ʹ첽طʽ
+    private void OnSimulationButtonClicked()
+    {
+        string mapFolder = mapFolderInput.text.Trim();
+        string simFolder = simFolderInput.text.Trim();
+
+        if (string.IsNullOrEmpty(mapFolder))
+        {
+            Debug.LogWarning("ͼļеַΪգ");
+            return;
+        }
+        if (string.IsNullOrEmpty(simFolder))
+        {
+            Debug.LogWarning("Simulation ļеַΪգ");
+            return;
+        }
+        GameManager.Instance.resourcePath = mapFolder;
+        GameManager.Instance.simPath = simFolder;
+        Debug.Log("ͼļеַΪ" + mapFolder + "Simulation ļеַΪ" + simFolder);
+
+        // 첽 SimulationPage 
+        StartCoroutine(LoadSimulationSceneAsync("SimulationPage"));
+    }
+
+    private IEnumerator LoadSimulationSceneAsync(string sceneName)
+    {
+        AsyncOperation asyncOp = SceneManager.LoadSceneAsync(sceneName);
+        // ӳټ³
+        asyncOp.allowSceneActivation = false;
+        Debug.Log("ʼ첽س " + sceneName);
+
+        // ȴؽȴﵽ 0.9Unity ³ʱֵΪ0.9
+        while (asyncOp.progress < 0.9f)
+        {
+            Debug.Log("ؽ: " + asyncOp.progress);
+            yield return null;
+        }
+        Debug.Log("ؽȴ 0.9ȴ SimulationPage ڲݼ...");
+
+        // ˴ɸ SimulationPage ڲݼӳʱ
+        // ʾм򵥵ȴ 1 
+        yield return new WaitForSeconds(1f);
+
+        // ³
+        asyncOp.allowSceneActivation = true;
+        yield return null;
+    }
+}
+
+
+// 文件: ToolItemButton.cs
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+public class ToolItemButton : MonoBehaviour
+{
+    public EditorItem item;
+
+    [Header("UI ")]
+    public Image iconImage;        // ͼʾ
+    public TMP_Text nameText;      // Ʒı
+    public TMP_Text categoryText;  // Ʒı
+
+    private Button button;
+
+    private void Awake()
+    {
+        button = GetComponent<Button>();
+        button.onClick.AddListener(OnButtonClicked);
+    }
+
+    public void Setup(EditorItem newItem)
+    {
+        item = newItem;
+        if (iconImage != null && item.thumbnail != null)
+        {
+            iconImage.sprite = item.thumbnail;
+            float originalWidth = item.thumbnail.rect.width;
+            float originalHeight = item.thumbnail.rect.height;
+            float scaleX = 70f / originalWidth;
+            float scaleY = 60f / originalHeight;
+            float scaleFactor = Mathf.Min(scaleX, scaleY, 1f);
+            iconImage.rectTransform.sizeDelta = new Vector2(originalWidth * scaleFactor, originalHeight * scaleFactor);
+        }
+        if (nameText != null)
+            nameText.text = item.itemName;
+        if (categoryText != null)
+        {
+            categoryText.text = item.category.ToString();
+            if (item.category == EditorItemCategory.Object)
+            {
+                Color colorObj;
+                if (ColorUtility.TryParseHtmlString("#f75d00", out colorObj))
+                    categoryText.color = colorObj;
+            }
+            else if (item.category == EditorItemCategory.Building)
+            {
+                Color colorBld;
+                if (ColorUtility.TryParseHtmlString("#00fcff", out colorBld))
+                    categoryText.color = colorBld;
+            }
+        }
+    }
+
+    public void OnButtonClicked()
+    {
+        if (EditorManager.Instance != null)
+        {
+            // ѡͬһťȡѡ״̬
+            if (EditorManager.Instance.currentSelectedItem == item)
+            {
+                EditorManager.Instance.SetSelectedItem(null);  // ȡѡ
+            }
+            else
+            {
+                EditorManager.Instance.SetSelectedItem(item);  // ѡƷ
+            }
+        }
+    }
+}
+
+
+// 文件: ToolPanelManager.cs
+using System.Collections.Generic;
+using UnityEngine;
+
+public class ToolPanelManager : MonoBehaviour
+{
+    [Header("Ʒб")]
+    public List<EditorItem> availableItems = new List<EditorItem>();
+
+    [Header("UI ")]
+    // Content ScrollRect ڣ
+    public Transform contentPanel;
+    // Ԥ壺ToolItemButton Assets/Prefab дԤ壩
+    public GameObject toolItemButtonPrefab;
+
+    [Header("ǰ")]
+    public EditorItemCategory filterCategory = EditorItemCategory.All;
+
+    public void PopulateToolItems()
+    {
+        // յǰ Content 
+        foreach (Transform child in contentPanel)
+            Destroy(child.gameObject);
+
+        //  availableItemsݹԤ
+        foreach (var item in availableItems)
+        {
+            if (filterCategory == EditorItemCategory.All || item.category == filterCategory)
+            {
+                GameObject btnObj = Instantiate(toolItemButtonPrefab, contentPanel);
+                ToolItemButton tib = btnObj.GetComponent<ToolItemButton>();
+                if (tib != null)
+                    tib.Setup(item);
+            }
+        }
+    }
+
+    public void SetFilterCategory(int categoryIndex)
+    {
+        filterCategory = (EditorItemCategory)categoryIndex;
+        PopulateToolItems();
+    }
+}
+
+
