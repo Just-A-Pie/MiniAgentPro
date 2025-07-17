@@ -1,0 +1,2 @@
+sampleSim/*.json filter=lfs diff=lfs merge=lfs -text
+Assets/Font/*.asset filter=lfs diff=lfs merge=lfs -text
