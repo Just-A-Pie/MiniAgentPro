@@ -1,0 +1,21 @@
+### Unity 基础忽略 ###
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+MemoryCaptures/
+
+# Visual Studio / VSCode
+.vs/
+.vscode/
+*.csproj
+*.sln
+*.user
+*.unityproj
+
+# Crashlytics, Mac 等
+*.DS_Store
+*.apk
+*.ipa
