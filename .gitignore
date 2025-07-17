@@ -101,3 +101,9 @@ InitTestScene*.unity*
 # ignore huge font asset
 Assets/Font/VONWAONBITMAP-16PX SDF.asset
 
+
+# extra ignore.plastic/
+.vsconfig
+ignore.conf
+.gitattributes
+
