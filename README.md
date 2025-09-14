@@ -1,2 +1,4 @@
-# unity-miniagent
-基于 Unity 的 2D 网格地图编辑与智能体仿真可视化工具
+# MiniAgentPro
+
+This repository contains the project source files for **MiniAgentPro**.  
+For the executable builds, please visit: [MiniAgentStudio](https://github.com/Just-A-Pie/MiniAgentStudio).
