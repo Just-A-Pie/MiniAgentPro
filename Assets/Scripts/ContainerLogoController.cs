@@ -1,260 +1,361 @@
-using UnityEngine;
+ï»¿using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
+using System.Linq;
+using System.Collections.Generic;
 
 /// <summary>
-/// ContainerLogoController ¸ºÔğÉú³É²¢¹ÜÀíÎïÆ·¶ÔÓ¦µÄÈİÆ÷Í¼±ê£¨logo£©¡£
-/// ±¾°æ±¾½« logo ¶ÔÏó·ÅÈë MapManager.Instance.mapContent ÏÂ×¨ÓÃµÄ LogoContainer ÖĞ£¬
-/// ²¢ÔÚ LogoContainer ÄÚ´´½¨Ò»¸ö LogoHolder ÓÃÓÚ½ÓÊÕÊó±êÊÂ¼ş£¬
-/// LogoHolder ÏÂ¹ÒÔØÊµ¼ÊÏÔÊ¾ logo µÄ LogoImage ¶ÔÏó£¨Image.raycastTarget Îª false£©¡£
-/// µ±Êó±êĞüÍ£ÔÚ LogoHolder ÉÏÊ±£¬½« LogoImage ÉèÎª°ëÍ¸Ã÷£»
-/// µ±Êó±êµã»÷ LogoHolder Ê±£¬ÊÂ¼ş»á±»×ª·¢µ½ÆäÏÂ·½µÄÄ¿±ê£¬
-/// ÒÔÊµÏÖ logo ²»×èµ²ÎïÆ·½»»¥µÄĞ§¹û¡£
-/// ÈôÈ«¾ÖÅäÖÃ¹ÜÀíÆ÷ (ContainerLogoConfigManager) ´æÔÚ£¬ÔòÊ¹ÓÃÆäÖĞÉèÖÃµÄ²ÎÊı£»
-/// ·ñÔò²ÉÓÃ±¾½Å±¾µÄ±¸ÓÃÄ¬ÈÏÖµ¡£
+/// åœ¨ç‰©å“ä¸Šæ–¹æ˜¾ç¤ºâ€œå®¹å™¨æ°”æ³¡â€é¢„åˆ¶ä½“ï¼š
+/// - é¢„åˆ¶ä½“å†…éƒ¨åŒ…å«åä¸º "icon" çš„ Imageï¼Œæ˜¾ç¤ºç¬¬ä¸€ä¸ªå­ç‰©å“çš„ç¼©ç•¥å›¾ï¼›
+/// - é¢„åˆ¶ä½“ä¸æ‹‰ä¼¸ï¼Œä¿æŒè‡ªèº«å°ºå¯¸ï¼›
+/// - å¤–å±‚æœ‰ä¸€ä¸ª holderï¼ˆåªè´Ÿè´£å®šä½ä¸æ¥æ”¶/è½¬å‘äº‹ä»¶ï¼Œé¢„åˆ¶ä½“ä¸ºçº¯è§†è§‰ï¼‰ï¼›
+/// - æ‚¬åœåŠé€æ˜ã€ç‚¹å‡»/æ»šè½®/å³é”®è½¬å‘åˆ°åº•éƒ¨ï¼›
+/// - æ—¶åºï¼šç«‹å³åˆ·æ–° + ä¸‹ä¸€å¸§å…œåº• + æœ€å¤šé‡è¯•å‡ å¸§ï¼›
+/// - å®šä½ï¼šæ²¿ç”¨åˆç‰ˆçš„è®¡ç®—ï¼ˆå‡å®šç‰©ä½“ anchors=(0,1)ã€pivot=(0,1)ï¼‰ï¼ŒX=objectPos.x+0.5*widthï¼ŒY=objectPos.yã€‚
 /// </summary>
 public class ContainerLogoController : MonoBehaviour
 {
-    #region ±¸ÓÃÅäÖÃ£¨ÎŞÈ«¾ÖÅäÖÃÊ±ÉúĞ§£©
-    [Header("±¸ÓÃÅäÖÃ£¨ÎŞÈ«¾ÖÅäÖÃÊ±ÉúĞ§£©")]
-    [Tooltip("ÈİÆ÷Í¼±êÊ¹ÓÃµÄ Sprite")]
-    public Sprite containerLogoSprite;
-    [Tooltip("ÈİÆ÷Í¼±êµÄ´óĞ¡£¨¿í¡Á¸ß£¬µ¥Î»ÏñËØ£©")]
-    public Vector2 logoSize = new Vector2(20, 20);
-    [Tooltip("ÈİÆ÷Í¼±êÏà¶ÔÓÚÎïÆ·ÉÏ±ßÔµÖĞµãµÄÆ«ÒÆ£¬Y > 0 ±íÊ¾ÏòÉÏÁô³ö¿ÕÏ¶")]
+    [Header("å¤‡ç”¨é…ç½®ï¼ˆæ— å…¨å±€é…ç½®æ—¶ç”Ÿæ•ˆï¼‰")]
+    [Tooltip("å½“æ²¡æœ‰æä¾› prefab æˆ– icon èŠ‚ç‚¹ç¼ºå¤±æ—¶çš„å ä½å›¾ï¼ˆä¸€èˆ¬ä¸ä¼šç”¨åˆ°ï¼‰")]
+    public Sprite fallbackSprite;
+    [Tooltip("ç›¸å¯¹äºç‰©å“ä¸Šè¾¹ç¼˜ä¸­ç‚¹çš„åç§»ï¼ˆY > 0 å‘ä¸Šï¼‰")]
     public Vector2 offset = new Vector2(0, 2);
-    #endregion
 
-    // ÄÚ²¿»º´æ logoHolder ¶ÔÏó
-    private GameObject logoHolder;
+    // ä»…ç”¨äºå®šä½å’Œæ¥äº‹ä»¶ï¼›ä¸æ”¹å˜ mapContent å…¶å®ƒå­èŠ‚ç‚¹
+    private GameObject _holder;
+    // æ°”æ³¡é¢„åˆ¶ä½“å®ä¾‹ï¼ˆçº¯è§†è§‰ï¼Œä¸æ¥äº‹ä»¶ï¼Œä¸æ‹‰ä¼¸ï¼‰
+    private GameObject _bubble;
 
-    /// <summary>
-    /// ¸ù¾İ hasContainer ²ÎÊı¸üĞÂ logo ÏÔÊ¾×´Ì¬
-    /// </summary>
+    // æ—¶åºé‡è¯•
+    private int _pendingTries = 0;
+    private const int _maxTries = 5;
+
+    /// <summary>æ›´æ–°æ˜¾ç¤ºçŠ¶æ€ã€‚é¦–æ¬¡æ˜¾ç¤ºä¼šåˆ›å»º holder + å®ä¾‹åŒ–é¢„åˆ¶ä½“ï¼Œå¹¶åˆ·æ–° iconï¼ˆå«æ—¶åºå…œåº•ï¼‰ã€‚</summary>
     public void UpdateLogoVisibility(bool hasContainer)
     {
         if (hasContainer)
         {
-            if (logoHolder == null)
+            if (_holder == null)
             {
-                CreateLogo();
+                CreateHolderAndBubble();
+                // æ—¶åºï¼šç«‹å³ â†’ ä¸‹ä¸€å¸§ â†’ è‹¥å¹²å¸§
+                RefreshIconFromFirstChild();
+                LateRefresh();
+                _pendingTries = _maxTries;
+                StartCoroutine(_RetryRefresh());
             }
-            logoHolder.SetActive(true);
+            _holder.SetActive(true);
+            RefreshLogoPosition(); // é˜²æ­¢å¤–éƒ¨ç§»åŠ¨åæœªåˆ·æ–°
         }
         else
         {
-            if (logoHolder != null)
-                logoHolder.SetActive(false);
+            if (_holder != null) _holder.SetActive(false);
+        }
+    }
+
+    /// <summary>å½“å¤–éƒ¨ä¿®æ”¹äº† container åå¯ä¸»åŠ¨è°ƒç”¨ï¼ˆä¾‹å¦‚å¼¹çª—é‡Œä¿å­˜åï¼‰ã€‚</summary>
+    public void LateRefresh()
+    {
+        if (!isActiveAndEnabled) return;
+        StartCoroutine(_LateRefreshCo());
+    }
+
+    private System.Collections.IEnumerator _LateRefreshCo()
+    {
+        yield return new WaitForEndOfFrame();
+        RefreshIconFromFirstChild();
+        RefreshLogoPosition();
+    }
+
+    private System.Collections.IEnumerator _RetryRefresh()
+    {
+        while (_pendingTries-- > 0 && _holder != null)
+        {
+            yield return null; // ä¸‹ä¸€å¸§
+            var ok = RefreshIconFromFirstChild();
+            if (ok) yield break;
         }
     }
 
     /// <summary>
-    /// ´´½¨ logo ¼°Æä³ĞÔØ¶ÔÏó£º
-    /// 1. »ñÈ¡×¨ÓÃ LogoContainer£¨ÔÚ MapManager.mapContent ÏÂ£©¡£
-    /// 2. ÔÚ¸ÃÈİÆ÷ÏÂ´´½¨ LogoHolder£¬²¢Ìí¼Ó CanvasGroup ºÍ EventTrigger µÈÒÔ´¦ÀíÊó±êÊÂ¼ş¡£
-    /// 3. ÔÚ LogoHolder ÄÚ´´½¨ LogoImage ¶ÔÏóÏÔÊ¾ logo£¬ÇÒÆä raycastTarget ÉèÎª false¡£
-    /// 4. ¸ù¾İÎïÆ· RectTransform ¼ÆËã LogoHolder µÄ³õÊ¼Î»ÖÃ£ºµ×±ß½ôÌùÎïÆ·ÉÏ±ßÔµÇÒË®Æ½¾ÓÖĞ¡£
-    /// 5. µ÷ÓÃ SetAsLastSibling ±£Ö¤ LogoContainer Ê¼ÖÕ×îÉÏ²ã¡£
+    /// åˆ·æ–°é¢„åˆ¶ä½“ä¸­ "icon" çš„ Sprite ä¸ºç¬¬ä¸€ä¸ªå­ç‰©å“çš„ç¼©ç•¥å›¾ã€‚
+    /// è¿”å› true è¡¨ç¤ºè¿™æ¬¡è®¾ç½®åˆ°äº†éç©º spriteã€‚
     /// </summary>
-    private void CreateLogo()
+    public bool RefreshIconFromFirstChild()
     {
-        // »ñÈ¡×¨ÓÃ LogoContainer
+        if (_bubble == null) return false;
+
+        var mm = MapManager.Instance;
+        if (mm == null || mm.placedItems == null) return false;
+
+        // è‡ªèº«ï¼ˆuniqueId == gameObject.nameï¼‰
+        var selfId = gameObject.name;
+        int selfIdx = mm.placedItems.FindIndex(p => p.uniqueId == selfId);
+        if (selfIdx < 0) return false;
+
+        var self = mm.placedItems[selfIdx];
+        if (self.item == null || self.item.attributes == null) return false;
+
+        if (!self.item.attributes.TryGetValue("container", out var containerStr)) return false;
+        if (string.IsNullOrWhiteSpace(containerStr)) return false;
+
+        var firstChildId = containerStr
+            .Split(',')
+            .Select(s => s.Trim())
+            .FirstOrDefault(s => !string.IsNullOrEmpty(s));
+        if (string.IsNullOrEmpty(firstChildId)) return false;
+
+        // æ‰¾å­ç‰©å“ç¼©ç•¥å›¾
+        int childIdx = mm.placedItems.FindIndex(p => p.uniqueId == firstChildId);
+        Sprite childThumb = null;
+        if (childIdx >= 0)
+        {
+            var child = mm.placedItems[childIdx];
+            if (child.item != null) childThumb = child.item.thumbnail;
+        }
+
+        // å†™å…¥ icon
+        var iconImg = FindDeepChildImageByName(_bubble.transform, "icon");
+        if (iconImg == null)
+        {
+            // æ²¡æœ‰åä¸º icon çš„ Imageï¼Œå°½é‡é€‰ä¸€ä¸ªæœ€å¯èƒ½æ˜¯å›¾æ ‡çš„ Image
+            iconImg = PickBestImageForIcon(_bubble.transform);
+        }
+
+        if (iconImg != null)
+        {
+            iconImg.sprite = childThumb != null ? childThumb : null;
+            iconImg.preserveAspect = true;
+            iconImg.raycastTarget = false; // è§†è§‰ï¼Œä¸æ‹¦äº‹ä»¶
+            return childThumb != null;
+        }
+
+        // å½»åº•æ²¡æœ‰ Imageï¼ŒæŒ‚ä¸€ä¸ªå…œåº•
+        var rootImg = _bubble.GetComponent<Image>();
+        if (rootImg != null)
+        {
+            rootImg.sprite = childThumb != null ? childThumb : fallbackSprite;
+            rootImg.preserveAspect = true;
+            rootImg.raycastTarget = false;
+            return childThumb != null || fallbackSprite != null;
+        }
+
+        return false;
+    }
+
+    /// <summary>åˆ›å»º holderï¼ˆæ¥äº‹ä»¶ä¸å®šä½ï¼‰+ å®ä¾‹åŒ–é¢„åˆ¶ä½“ï¼ˆè§†è§‰ï¼‰ã€‚ä¸æ‹‰ä¼¸é¢„åˆ¶ä½“ã€‚</summary>
+    private void CreateHolderAndBubble()
+    {
         Transform logoContainer = GetLogoContainer();
 
-        // ´´½¨ LogoHolder ×÷Îª logo µÄ³ĞÔØ¶ÔÏó
-        logoHolder = new GameObject("LogoHolder", typeof(RectTransform));
-        logoHolder.transform.SetParent(logoContainer, false);
-        RectTransform holderRT = logoHolder.GetComponent<RectTransform>();
-        // ÉèÖÃ anchors ºÍ pivot Îª×óÉÏ½Ç£¨±ãÓÚÊ¹ÓÃ¾ø¶Ô×ø±ê½øĞĞ¶¨Î»£©
-        holderRT.anchorMin = new Vector2(0, 1);
-        holderRT.anchorMax = new Vector2(0, 1);
-        holderRT.pivot = new Vector2(0.5f, 0f); // µ×±ßÖĞĞÄ
+        // 1) holderï¼šé”šå®šåœ°å›¾åæ ‡ç³»ï¼Œå¤§å°ç”±é¢„åˆ¶ä½“å†³å®šï¼›holder åªæ¥äº‹ä»¶ï¼Œä¸æ¸²æŸ“
+        _holder = new GameObject("LogoHolder", typeof(RectTransform));
+        _holder.transform.SetParent(logoContainer, false);
+        var hrt = _holder.GetComponent<RectTransform>();
+        hrt.anchorMin = new Vector2(0, 1);
+        hrt.anchorMax = new Vector2(0, 1);
+        hrt.pivot = new Vector2(0.5f, 0f); // åº•è¾¹ä¸­å¿ƒï¼Œè´´ç‰©ä½“é¡¶éƒ¨ä¸­ç‚¹
 
-        // Ìí¼Ó CanvasGroup£¬ÓÃÓÚĞŞ¸ÄÍ¸Ã÷¶È£»ÕâÀïÔÊĞí½ÓÊÕÊÂ¼ş
-        CanvasGroup cg = logoHolder.AddComponent<CanvasGroup>();
+        // äº‹ä»¶ï¼šæ‚¬åœåŠé€æ˜ã€ç‚¹å‡»è½¬å‘ã€æ»šè½®/å³é”®é‡Šæ”¾
+        var cg = _holder.AddComponent<CanvasGroup>();
         cg.blocksRaycasts = true;
         cg.interactable = true;
         cg.alpha = 1f;
 
-        // Ìí¼Ó EventTrigger ´¦Àí PointerEnter/Exit/Click
-        EventTrigger trigger = logoHolder.AddComponent<EventTrigger>();
-        // PointerEnter£º½« LogoImage Í¸Ã÷¶ÈÉèÖÃÎª 0.5
-        EventTrigger.Entry entryEnter = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
-        entryEnter.callback.AddListener((data) =>
-        {
-            Debug.Log("Logo PointerEnter triggered");
-            SetLogoAlpha(0.5f);
-        });
+        var trigger = _holder.AddComponent<EventTrigger>();
+        var entryEnter = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
+        entryEnter.callback.AddListener((_) => SetHolderAlpha(0.5f));
         trigger.triggers.Add(entryEnter);
-        // PointerExit£º»Ö¸´Í¸Ã÷¶ÈÎª 1
-        EventTrigger.Entry entryExit = new EventTrigger.Entry { eventID = EventTriggerType.PointerExit };
-        entryExit.callback.AddListener((data) =>
-        {
-            Debug.Log("Logo PointerEnter triggered");
-            SetLogoAlpha(1f);
-        });
+
+        var entryExit = new EventTrigger.Entry { eventID = EventTriggerType.PointerExit };
+        entryExit.callback.AddListener((_) => SetHolderAlpha(1f));
         trigger.triggers.Add(entryExit);
-        // PointerClick£º×ª·¢µã»÷ÊÂ¼ş
-        EventTrigger.Entry entryClick = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
-        entryClick.callback.AddListener((data) =>
-        {
-            ForwardClickEvent((PointerEventData)data);
-        });
+
+        var entryClick = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
+        entryClick.callback.AddListener((data) => ForwardClickEvent((PointerEventData)data));
         trigger.triggers.Add(entryClick);
 
-        // ÔÚ LogoHolder ÄÚ´´½¨ LogoImage ÓÃÓÚÏÔÊ¾Êµ¼ÊÍ¼±ê
-        GameObject logoImageGO = new GameObject("LogoImage", typeof(Image));
-        logoImageGO.transform.SetParent(logoHolder.transform, false);
-        Image logoImg = logoImageGO.GetComponent<Image>();
-        // ÉèÖÃ logo Í¼ÏñÊ¹ÓÃµÄ Sprite£¨È«¾ÖÅäÖÃÓÅÏÈ£©
-        if (ContainerLogoConfigManager.Instance != null && ContainerLogoConfigManager.Instance.containerLogoSprite != null)
-            logoImg.sprite = ContainerLogoConfigManager.Instance.containerLogoSprite;
-        else
-            logoImg.sprite = containerLogoSprite;
-        logoImg.preserveAspect = true;
-        // ½« LogoImage ÉèÎª²»½ÓÊÕÉäÏß£¨ÒÔ±ãµã»÷´©Í¸µ½ LogoHolderÏÂ·½µÄÎïÆ·£©
-        logoImg.raycastTarget = false;
+        _holder.AddComponent<UIEventForwarder>();
 
-        // ÉèÖÃ LogoImage µÄ RectTransformÎªÈ«³ß´çÌî³ä LogoHolder
-        RectTransform logoImageRT = logoImageGO.GetComponent<RectTransform>();
-        logoImageRT.anchorMin = new Vector2(0, 0);
-        logoImageRT.anchorMax = new Vector2(1, 1);
-        logoImageRT.offsetMin = Vector2.zero;
-        logoImageRT.offsetMax = Vector2.zero;
+        // 2) æ°”æ³¡é¢„åˆ¶ä½“ï¼šä½œä¸º holder çš„å­ç‰©ä½“ï¼›ä¸æ‹‰ä¼¸ï¼Œä¿æŒè‡ªèº« sizeDelta
+        var prefab = ContainerLogoConfigManager.Instance != null
+            ? ContainerLogoConfigManager.Instance.containerBubblePrefab
+            : null;
 
-        // ÉèÖÃ LogoHolder µÄ³ß´çÓë LogoImage ´óĞ¡ÏàÍ¬
-        if (ContainerLogoConfigManager.Instance != null)
-            holderRT.sizeDelta = ContainerLogoConfigManager.Instance.logoSize;
-        else
-            holderRT.sizeDelta = logoSize;
-
-        // ¼ÆËã LogoHolder µÄ³õÊ¼Î»ÖÃ£º»ùÓÚÎïÆ·µÄ RectTransform
-        RectTransform objectRT = GetComponent<RectTransform>();
-        if (objectRT != null)
+        if (prefab != null)
         {
-            // ÎïÆ· anchoredPosition£¨¼ÙÉè anchors=(0,1) ÇÒ pivot=(0,1)£©
-            Vector2 objectPos = objectRT.anchoredPosition;
-            float objectWidth = objectRT.sizeDelta.x;
-            // Ï£Íû LogoHolder Ë®Æ½¾ÓÖĞÓÚÎïÆ·£¬µ×±ßÓëÎïÆ·ÉÏ±ßÔµ¶ÔÆë
-            Vector2 logoPos = new Vector2(objectPos.x + objectWidth * 0.5f, objectPos.y);
-            if (ContainerLogoConfigManager.Instance != null)
-                logoPos += ContainerLogoConfigManager.Instance.offset;
-            else
-                logoPos += offset;
-            holderRT.anchoredPosition = logoPos;
+            _bubble = GameObject.Instantiate(prefab, _holder.transform, false);
+            _bubble.name = "Bubble";
+
+            var brt = _bubble.GetComponent<RectTransform>() ?? _bubble.AddComponent<RectTransform>();
+            // é¢„åˆ¶ä½“ä¸æ‹‰ä¼¸ï¼šä¿æŒè‡ªèº«å°ºå¯¸ä¸å¸ƒå±€
+            brt.anchorMin = new Vector2(0.5f, 0f);
+            brt.anchorMax = new Vector2(0.5f, 0f);
+            brt.pivot = new Vector2(0.5f, 0f);
+            brt.anchoredPosition = Vector2.zero; // è´´åœ¨ holder åº•è¾¹ä¸­å¿ƒ
+
+            // åŒæ­¥ holder å°ºå¯¸ = é¢„åˆ¶ä½“å°ºå¯¸
+            SyncHolderSizeToBubble();
         }
         else
         {
-            Debug.LogWarning("ContainerLogoController Î´¹ÒÔØÔÚ´øÓĞ RectTransform µÄÎïÆ·ÉÏ£¬ÎŞ·¨¼ÆËã logo Î»ÖÃ");
+            // æ²¡æœ‰ prefabï¼šå…œåº•ä¸€ä¸ªå°å›¾
+            _bubble = new GameObject("Bubble_Fallback", typeof(RectTransform), typeof(Image));
+            _bubble.transform.SetParent(_holder.transform, false);
+            var brt = _bubble.GetComponent<RectTransform>();
+            brt.anchorMin = new Vector2(0.5f, 0f);
+            brt.anchorMax = new Vector2(0.5f, 0f);
+            brt.pivot = new Vector2(0.5f, 0f);
+            brt.sizeDelta = new Vector2(20, 20);
+
+            var img = _bubble.GetComponent<Image>();
+            img.sprite = fallbackSprite;
+            img.preserveAspect = true;
+            img.raycastTarget = false;
+
+            SyncHolderSizeToBubble();
         }
 
-        // È·±£ LogoContainer Ê¼ÖÕÔÚ mapContent ×îÉÏ²ã
+        // é¢„åˆ¶ä½“å†…æ‰€æœ‰ Image ä¸æ‹¦æˆªäº‹ä»¶
+        foreach (var img in _bubble.GetComponentsInChildren<Image>(true))
+            img.raycastTarget = false;
+
+        // åˆå§‹å®šä½ & ç½®é¡¶
+        RefreshLogoPosition();
         logoContainer.SetAsLastSibling();
     }
 
-    /// <summary>
-    /// ÉèÖÃ LogoImage µÄÍ¸Ã÷¶È
-    /// </summary>
-    /// <param name="alpha">Ä¿±êÍ¸Ã÷¶È</param>
-    private void SetLogoAlpha(float alpha)
+    private void SetHolderAlpha(float a)
     {
-        // LogoImage ÔÚ LogoHolder µÄµÚÒ»¸ö×Ó¶ÔÏó
-        if (logoHolder != null && logoHolder.transform.childCount > 0)
-        {
-            Image logoImg = logoHolder.transform.GetChild(0).GetComponent<Image>();
-            if (logoImg != null)
-            {
-                Color c = logoImg.color;
-                c.a = alpha;
-                logoImg.color = c;
-            }
-        }
+        if (_holder == null) return;
+        var cg = _holder.GetComponent<CanvasGroup>();
+        if (cg != null) cg.alpha = a;
     }
 
-    /// <summary>
-    /// ½«µã»÷ÊÂ¼ş×ª·¢µ½ logo ÏÂ·½ÎïÌå
-    /// </summary>
-    /// <param name="data"></param>
+    /// <summary>æŠŠç‚¹å‡»è½¬å‘åˆ° holder ä¸‹æ–¹çœŸå®ç‰©ä½“ï¼ˆé¿å…é®æŒ¡äº¤äº’ï¼‰ã€‚</summary>
     private void ForwardClickEvent(PointerEventData data)
     {
-        // ÔÚ logoËùÔÚÎ»ÖÃ×öÒ»´ÎÉäÏß¼ì²â£¬»ñÈ¡ÏÂ·½µÄµÚÒ»¸öÎïÌå
-        // ÕâÀï¼ÙÉè MapManager.Instance.mapContent ÉÏÓĞ GraphicRaycaster
-        GraphicRaycaster raycaster = MapManager.Instance.mapContent.GetComponent<GraphicRaycaster>();
-        if (raycaster == null)
+        var mapContent = MapManager.Instance != null ? MapManager.Instance.mapContent : null;
+        if (mapContent == null)
         {
-            Debug.LogWarning("ForwardClickEvent: MapContent È±ÉÙ GraphicRaycaster");
+            Debug.LogWarning("ForwardClickEvent: MapContent æœªè®¾ç½®");
             return;
         }
-        PointerEventData pointerData = new PointerEventData(EventSystem.current)
+        var raycaster = mapContent.GetComponent<GraphicRaycaster>();
+        if (raycaster == null)
         {
-            position = data.position
-        };
-        var results = new System.Collections.Generic.List<RaycastResult>();
+            Debug.LogWarning("ForwardClickEvent: MapContent ç¼ºå°‘ GraphicRaycaster");
+            return;
+        }
+
+        var pointerData = new PointerEventData(EventSystem.current) { position = data.position };
+        var results = new List<RaycastResult>();
         raycaster.Raycast(pointerData, results);
-        // ÕÒµ½µÚÒ»¸ö²»ÊÇ logoHolder µÄÄ¿±ê£¨¼´ÏÂ·½ÎïÆ·£©
-        foreach (RaycastResult result in results)
+
+        foreach (var r in results)
         {
-            if (result.gameObject != logoHolder)
-            {
-                // ´¥·¢¸ÃÎïÌåµÄµã»÷ÊÂ¼ş
-                ExecuteEvents.Execute(result.gameObject, data, ExecuteEvents.pointerClickHandler);
-                break;
-            }
+            // è·³è¿‡ holder ä¸å…¶å­èŠ‚ç‚¹
+            if (_holder != null && (r.gameObject == _holder || r.gameObject.transform.IsChildOf(_holder.transform)))
+                continue;
+
+            ExecuteEvents.Execute(r.gameObject, data, ExecuteEvents.pointerClickHandler);
+            break;
         }
     }
 
     /// <summary>
-    /// Èç¹ûÎïÆ·Î»ÖÃ±ä»¯£¬¿Éµ÷ÓÃ´Ë·½·¨¸üĞÂ LogoHolder Î»ÖÃ
+    /// è‹¥ç‰©å“ä½ç½®å˜åŒ–ï¼šæ›´æ–°â€œé¡¶éƒ¨ä¸­ç‚¹ + offsetâ€ã€‚
+    /// ï¼ˆåˆç‰ˆç­‰å¼ï¼šX=objectPos.x+0.5*widthï¼ŒY=objectPos.yï¼‰
     /// </summary>
     public void RefreshLogoPosition()
     {
-        if (logoHolder != null)
-        {
-            RectTransform holderRT = logoHolder.GetComponent<RectTransform>();
-            RectTransform objectRT = GetComponent<RectTransform>();
-            if (objectRT != null && holderRT != null)
-            {
-                Vector2 objectPos = objectRT.anchoredPosition;
-                float objectWidth = objectRT.sizeDelta.x;
-                Vector2 logoPos = new Vector2(objectPos.x + objectWidth * 0.5f, objectPos.y);
-                if (ContainerLogoConfigManager.Instance != null)
-                    logoPos += ContainerLogoConfigManager.Instance.offset;
-                else
-                    logoPos += offset;
-                holderRT.anchoredPosition = logoPos;
-            }
-        }
+        if (_holder == null) return;
+
+        var objectRT = GetComponent<RectTransform>();
+        var holderRT = _holder.GetComponent<RectTransform>();
+        if (objectRT == null || holderRT == null) return;
+
+        Vector2 objectPos = objectRT.anchoredPosition;
+        float objectWidth = objectRT.sizeDelta.x;
+
+        // â€”â€” å›åˆ°åˆç‰ˆçš„å®šä½å…¬å¼ â€”â€” //
+        Vector2 topCenter = new Vector2(objectPos.x + objectWidth * 0.5f, objectPos.y);
+
+        holderRT.anchoredPosition = topCenter + GetConfigOffset();
     }
 
-    /// <summary>
-    /// »ñÈ¡»ò´´½¨×¨ÓÃµÄ LogoContainer£¬¹ÒÔÚ MapManager.Instance.mapContent ÏÂ£¬
-    /// ÓÃÓÚ´æ·ÅËùÓĞ logo ¶ÔÏó£¬²¢Ê¼ÖÕ±£³ÖÔÚ×îÉÏ²ã¡£
-    /// </summary>
+    private Vector2 GetConfigOffset()
+    {
+        if (ContainerLogoConfigManager.Instance != null)
+            return ContainerLogoConfigManager.Instance.offset;
+        return offset;
+    }
+
+    /// <summary>å–/å»º LogoContainerï¼ˆæŒ‚åœ¨ mapContent ä¸‹ï¼‰ã€‚</summary>
     private Transform GetLogoContainer()
     {
-        Transform mapContent = MapManager.Instance.mapContent;
+        var mapContent = MapManager.Instance != null ? MapManager.Instance.mapContent : null;
         if (mapContent == null)
         {
-            Debug.LogError("GetLogoContainer: MapManager.Instance.mapContent Î´ÉèÖÃ£¡");
+            Debug.LogError("GetLogoContainer: MapManager.Instance.mapContent æœªè®¾ç½®ï¼");
             return transform;
         }
         Transform container = mapContent.Find("LogoContainer");
         if (container == null)
         {
-            GameObject logoContainerGO = new GameObject("LogoContainer", typeof(RectTransform));
-            logoContainerGO.transform.SetParent(mapContent, false);
-            RectTransform rt = logoContainerGO.GetComponent<RectTransform>();
+            var go = new GameObject("LogoContainer", typeof(RectTransform));
+            go.transform.SetParent(mapContent, false);
+            var rt = go.GetComponent<RectTransform>();
             rt.anchorMin = new Vector2(0, 1);
             rt.anchorMax = new Vector2(0, 1);
             rt.pivot = new Vector2(0, 1);
             rt.anchoredPosition = Vector2.zero;
-            logoContainerGO.transform.SetAsLastSibling();
-            container = logoContainerGO.transform;
+            go.transform.SetAsLastSibling();
+            container = go.transform;
         }
         else
         {
             container.SetAsLastSibling();
         }
         return container;
+    }
+
+    /// <summary>æŠŠ holder å°ºå¯¸åŒæ­¥ä¸º bubble çš„å°ºå¯¸ã€‚</summary>
+    private bool SyncHolderSizeToBubble()
+    {
+        if (_holder == null || _bubble == null) return false;
+        var hrt = _holder.GetComponent<RectTransform>();
+        var brt = _bubble.GetComponent<RectTransform>();
+        if (hrt == null || brt == null) return false;
+        hrt.sizeDelta = brt.sizeDelta;
+        return true;
+    }
+
+    /// <summary>é€’å½’æŒ‰åç§°æŸ¥æ‰¾ Imageã€‚</summary>
+    private Image FindDeepChildImageByName(Transform root, string name)
+    {
+        foreach (var t in root.GetComponentsInChildren<Transform>(true))
+        {
+            if (t.name == name)
+            {
+                var img = t.GetComponent<Image>();
+                if (img != null) return img;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>æ²¡æœ‰ "icon" æ—¶ï¼Œå°è¯•é€‰ä¸€ä¸ªæœ€å¯èƒ½æ˜¯å›¾æ ‡çš„ Imageã€‚</summary>
+    private Image PickBestImageForIcon(Transform root)
+    {
+        // ä¼˜å…ˆè§„åˆ™ï¼šåå­—åŒ…å« "icon"ï¼›å¦åˆ™éšä¾¿å–ä¸€ä¸ªèƒ½çœ‹åˆ°çš„ Image
+        Image best = null;
+        foreach (var img in root.GetComponentsInChildren<Image>(true))
+        {
+            var n = img.gameObject.name.ToLowerInvariant();
+            if (n.Contains("icon")) return img;
+            if (best == null) best = img;
+        }
+        return best;
     }
 }

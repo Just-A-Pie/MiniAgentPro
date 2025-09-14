@@ -35,32 +35,35 @@ public class SimulationMapManager : MonoBehaviour
 
     private void Start()
     {
+        Debug.Log("[SIMBOOT:S2] SimMapManager Start()");
         /* 根目录 */
         if (string.IsNullOrEmpty(mapFolder))
         {
             if (GameManager.Instance != null)
                 mapFolder = GameManager.Instance.resourcePath;
             else
-                Debug.LogError("SimulationMapManager: 未设置 mapFolder 且未找到 GameManager！");
+                Debug.LogError("[SIMBOOT:S2][ERR] 未设置 mapFolder 且未找到 GameManager！");
         }
+        Debug.Log("[SIMBOOT:S2] mapFolder=" + mapFolder);
 
         /* ① 统一父容器坐标系为左上 */
         SetTopLeft(mapDisplayArea);   // 锚 & Pivot
-        SetTopLeft(mapContent);   // 锚 & Pivot
+        SetTopLeft(mapContent);       // 锚 & Pivot
 
         /* ② 加载背景贴图 */
         LoadMapBackground();
     }
 
-    /*──────────── 加载背景 ────────────*/
+
     public void LoadMapBackground()
     {
         string actualMapFolder = Path.Combine(mapFolder, "map");
         string texturePath = Path.Combine(actualMapFolder, mapTextureFileName);
+        Debug.Log("[SIMBOOT:S2] Try load background: " + texturePath);
 
         if (!File.Exists(texturePath))
         {
-            Debug.LogWarning($"SimulationMapManager: 未找到地图贴图 {texturePath}");
+            Debug.LogWarning("[SIMBOOT:S2][ERR] 未找到地图贴图 " + texturePath);
             return;
         }
 
@@ -68,7 +71,7 @@ public class SimulationMapManager : MonoBehaviour
         Texture2D tex = new Texture2D(2, 2);
         if (!tex.LoadImage(File.ReadAllBytes(texturePath)))
         {
-            Debug.LogError("SimulationMapManager: 贴图加载失败");
+            Debug.LogError("[SIMBOOT:S2][ERR] 贴图加载失败");
             return;
         }
         Sprite sp = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height),
@@ -80,6 +83,7 @@ public class SimulationMapManager : MonoBehaviour
             GameObject go = new GameObject("MapImage", typeof(Image));
             go.transform.SetParent(mapContent, false);
             mapImage = go.GetComponent<Image>();
+            Debug.Log("[SIMBOOT:S2] Created MapImage object");
         }
         mapImage.sprite = sp;
 
@@ -101,8 +105,9 @@ public class SimulationMapManager : MonoBehaviour
         /* 背景放最底层 */
         mapImage.transform.SetSiblingIndex(0);
 
-        Debug.Log($"[SimMapMgr] 背景加载完成  原:{tex.width}x{tex.height}  缩:{imgRT.sizeDelta}");
+        Debug.Log($"[SIMBOOT:S2] Background created. src={tex.width}x{tex.height} scaled={imgRT.sizeDelta} factor={backgroundScaleFactor}");
     }
+
 
     /*──────────── 工具函数 ────────────*/
     /// <summary>把 RectTransform 的 Anchor 与 Pivot 都设为左上 (0,1)</summary>

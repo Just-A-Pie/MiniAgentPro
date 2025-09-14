@@ -2,6 +2,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using System.Linq;
 
 public class InformationPanelController : MonoBehaviour
 {
@@ -67,10 +68,20 @@ public class InformationPanelController : MonoBehaviour
         locationText.text = agent.location ?? "";
         activityText.text = agent.activity ?? "";
 
-        string[] ig = { "menu", "notebooks", "clothes", "body wash" };
-        var filt = System.Array.FindAll(agent.bag ?? new string[0],
-                     x => System.Array.IndexOf(ig, x.ToLower()) == -1);
-        bagText.text = string.Join(", ", filt);
+        // 直接全量显示（跳过 null/空白），并在 bag 为空时显示占位符
+        if (agent.bag == null || agent.bag.Length == 0)
+        {
+            bagText.text = "—";  // 也可以用 "(empty)" 自行决定
+        }
+        else
+        {
+            // 去掉空字符串与前后空格，保证显示干净
+            var cleaned = agent.bag
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s.Trim());
+            bagText.text = string.Join(", ", cleaned);
+        }
+
 
         string baseName = agent.walkingSpriteSheetName ?? agent.name;
         agentIcon.sprite = TryLoadFirstFrameSprite(baseName);
@@ -120,13 +131,16 @@ public class InformationPanelController : MonoBehaviour
         otherTypeText.text = placed.category.ToString();
         otherPositionText.text = $"({placed.gridX}, {placed.gridY})";
 
+        // 原来：直接把所有属性拼成 "key: value"
         if (placed.item.attributes != null && placed.item.attributes.Count > 0)
             otherAttributesText.text = string.Join(
-                   ", ",
-                   System.Linq.Enumerable.Select(placed.item.attributes,
-                       kv => $"{kv.Key}: {kv.Value}"));
+                ", ",
+                System.Linq.Enumerable.Select(placed.item.attributes,
+                    kv => $"{kv.Key}: {kv.Value}"));
         else
             otherAttributesText.text = "";
+
+
 
         otherIcon.sprite = placed.item.thumbnail;
         if (placed.item.thumbnail != null)
@@ -179,3 +193,4 @@ public class InformationPanelController : MonoBehaviour
         return null;
     }
 }
+

@@ -1,0 +1,4 @@
+repository "MiniAgentPro@tj_just_a_pie@cloud.cn"
+  path "/"
+    br "/main"
+    co "/main"

@@ -1,30 +1,26 @@
 using UnityEngine;
 
 /// <summary>
-/// 该管理器用于在 Inspector 中统一配置容器图标的视觉参数，
-/// 可通过 ContainerLogoController 等组件统一获取这些参数。
+/// 全局配置：提供“容器气泡”预制体与定位偏移；
+/// 预制体内需包含名为 "icon" 的 Image。
 /// </summary>
 public class ContainerLogoConfigManager : MonoBehaviour
 {
     public static ContainerLogoConfigManager Instance;
 
-    [Header("容器图标配置")]
-    [Tooltip("容器图标使用的 Sprite")]
-    public Sprite containerLogoSprite;
+    [Header("容器气泡")]
+    [Tooltip("显示在物品顶部的气泡预制体（内部包含名为 'icon' 的 Image）")]
+    public GameObject containerBubblePrefab;
 
-    [Tooltip("容器图标的大小（宽×高，单位像素）")]
-    public Vector2 logoSize = new Vector2(20, 20);
-
-    [Tooltip("容器图标相对于物品顶部中间的偏移，Y > 0 表示向上留空隙")]
+    [Tooltip("相对于物品顶部中点的偏移（Y > 0 向上）")]
     public Vector2 offset = new Vector2(0, 2);
 
     private void Awake()
     {
-        // 使用单例模式确保全局统一配置
         if (Instance == null)
         {
             Instance = this;
-            // 如果需要在切换场景时保留配置，则使用：
+            // 如需跨场景保留：
             // DontDestroyOnLoad(gameObject);
         }
         else

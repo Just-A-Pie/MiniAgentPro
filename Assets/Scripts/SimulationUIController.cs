@@ -3,9 +3,6 @@ using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
 
-/// <summary>
-/// 管理 Simulation 模式下物品的高亮和信息面板显示
-/// </summary>
 public class SimulationUIController : MonoBehaviour
 {
     public static SimulationUIController Instance;
@@ -13,13 +10,21 @@ public class SimulationUIController : MonoBehaviour
     [Header("信息面板控制器 引用")]
     public InformationPanelController infoPanel;
 
-    // 存放 uniqueId -> Outline
     private Dictionary<string, Outline> outlineMap = new Dictionary<string, Outline>();
-    // 自维护一份 Simulation 放置物字典：uniqueId -> PlacedItem
     private Dictionary<string, MapManager.PlacedItem> simPlacedItems = new Dictionary<string, MapManager.PlacedItem>();
 
     private string hoveredId;
     private string pinnedId;
+
+    private SimulationAgentRenderer agentRendererRef;
+
+    public bool HasPinnedObject => !string.IsNullOrEmpty(pinnedId);
+
+    public void ClearPinned()
+    {
+        pinnedId = null;
+        Refresh();
+    }
 
     private void Awake()
     {
@@ -35,11 +40,10 @@ public class SimulationUIController : MonoBehaviour
 
         if (infoPanel == null)
             Debug.LogError("[SimulationUIController] infoPanel 引用未设置！");
+
+        agentRendererRef = SimulationAgentRenderer.Instance ?? FindObjectOfType<SimulationAgentRenderer>();
     }
 
-    /// <summary>
-    /// SimulationMapRenderer 在创建每个实例时调用
-    /// </summary>
     public void RegisterItem(string uniqueId, Outline outline, MapManager.PlacedItem placedItem)
     {
         outlineMap[uniqueId] = outline;
@@ -49,64 +53,68 @@ public class SimulationUIController : MonoBehaviour
 
     public void OnItemPointerEnter(string id)
     {
-        Debug.Log($"[SimulationUIController] OnItemPointerEnter id={id}");
         hoveredId = id;
         Refresh();
     }
 
     public void OnItemPointerExit(string id)
     {
-        Debug.Log($"[SimulationUIController] OnItemPointerExit id={id}");
         if (hoveredId == id) hoveredId = null;
         Refresh();
     }
 
     public void OnItemPointerClick(string id)
     {
-        Debug.Log($"[SimulationUIController] OnItemPointerClick id={id}");
         pinnedId = (pinnedId == id) ? null : id;
+
+        if (pinnedId != null)
+        {
+            // 固定物体时，清掉 Agent 固定
+            (SimulationAgentRenderer.Instance ?? agentRendererRef)?.ClearPinned();
+        }
+
         Refresh();
     }
 
-    /// <summary>
-    /// Refresh 会更新高亮状态并根据 hoveredId/pinnedId 控制信息面板显示。
-    /// </summary>
     private void Refresh()
     {
-        // 1) 更新描边高亮
-        foreach (var kv in outlineMap)
+        // 1) 始终先更新物体的描边（仅固定的那个开启）
+        foreach (var kvp in outlineMap)
         {
-            bool highlight = (kv.Key == pinnedId);
-            kv.Value.enabled = highlight;
+            bool highlight = (kvp.Key == pinnedId);
+            kvp.Value.enabled = highlight;
         }
 
-        // 2) 决定当前要显示哪一个
-        string active = pinnedId ?? hoveredId;
-        Debug.Log($"[SimulationUIController] Refresh(): hovered={hoveredId}, pinned={pinnedId}, active={active}");
+        // 2) 仲裁：如果 Agent 处于“固定”状态，Object/Building 的“悬浮”不得改写/清空信息面板
+        var agentRenderer = SimulationAgentRenderer.Instance ?? agentRendererRef;
+        bool agentPinned = agentRenderer != null && agentRenderer.HasPinnedAgent;
 
+        if (agentPinned && string.IsNullOrEmpty(pinnedId))
+        {
+            // 让 Agent 侧保持/恢复面板显示，不在此改写或清空
+            agentRenderer?.ForceRefreshInfoPanel();
+            return;
+        }
+
+        // 3) 正常逻辑：如果有固定对象，显示固定对象；否则显示悬浮对象；都没有则清空
+        string active = pinnedId ?? hoveredId;
         if (!string.IsNullOrEmpty(active))
         {
             if (simPlacedItems.TryGetValue(active, out var pi))
             {
-                Debug.Log($"[SimulationUIController] Showing OtherInfo for id={active}");
                 infoPanel.SetOtherInfo(pi);
             }
             else
             {
-                Debug.LogWarning($"[SimulationUIController] No simPlacedItems entry for id={active}");
                 infoPanel.Clear();
             }
         }
         else
         {
-            Debug.Log("[SimulationUIController] Clearing panel (no active id)");
             infoPanel.Clear();
         }
     }
 
-    /// <summary>
-    /// 外部若需查询某个 uniqueId 对应的 itemName，可以用这个方法
-    /// </summary>
     public bool TryGetItemName(string uniqueId, out string itemName)
     {
         if (simPlacedItems.TryGetValue(uniqueId, out var pi))

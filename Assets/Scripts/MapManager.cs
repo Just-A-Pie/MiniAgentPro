@@ -3,11 +3,23 @@ using UnityEngine.UI;
 using System.IO;
 using System.Collections.Generic;
 using System;
+using System.Collections;
 
 public class MapManager : MonoBehaviour
 {
     public static MapManager Instance;
     public PopupManager popupManager;
+    // 缓存 CSV，避免重复 ReadAllLines
+    private readonly Dictionary<string, string[]> _csvCache = new Dictionary<string, string[]>();
+
+    // 控制台喋喋不休的开关（默认关）
+    public bool verboseMazeLogs = false;
+
+    // —— 新增：标记是否已经构建过新版 Maze 数据 —— 
+    public bool hasMazeBuilt = false;
+
+    // —— 增量重建：脏矩形收集 —— //
+    private readonly List<RectInt> _dirtyRects = new List<RectInt>();
 
     private void Awake()
     {
@@ -392,6 +404,9 @@ public class MapManager : MonoBehaviour
             return;
         }
 
+        // ★★★ 新增：在删除前先标脏它的足迹矩形（用于增量重建）
+        MarkDirtyByPlacedItem(itemToRemove.Value);
+
         // 递归删除其子物品（如果它是 container）
         if (itemToRemove.Value.item.attributes != null && itemToRemove.Value.item.attributes.ContainsKey("container"))
         {
@@ -418,14 +433,14 @@ public class MapManager : MonoBehaviour
 
         // 从列表中移除
         placedItems.Remove(itemToRemove.Value);
-
-        // 标记脏并在 Overlay 模式下刷新
+        // 标记脏；如正在显示覆盖层，触发一次“带遮罩的懒刷新”
         isDirty = true;
         if (GridOverlayManager.Instance != null &&
             GridOverlayManager.Instance.currentMode != GridOverlayManager.OverlayMode.None)
         {
-            GridOverlayManager.Instance.RefreshOverlay();
+            GridOverlayManager.Instance.RefreshWithOverlay();
         }
+
 
         Debug.Log($"删除物品成功: {uniqueId}");
     }
@@ -829,7 +844,9 @@ public class MapManager : MonoBehaviour
                     {
                         // Sector 层
                         int sectorVal = GetProvidedMazeValue(placed.item, "sector", c, r);
-                        Debug.Log($"Building {placed.uniqueId} - Sector local ({c},{r}) => value {sectorVal}");
+                        if (verboseMazeLogs)
+                            Debug.Log($"Building {placed.uniqueId} - Sector local ({c},{r}) => value {sectorVal}");
+
                         if (sectorVal != -1)
                         {
                             if (sectorVal == 0)
@@ -899,6 +916,8 @@ public class MapManager : MonoBehaviour
                 }
             }
         }
+        hasMazeBuilt = true;   // ← 关键：构建完成置位
+
         Debug.Log("新版 Map Maze 数据重构完成");
     }
 
@@ -912,43 +931,31 @@ public class MapManager : MonoBehaviour
         string filePath = "";
         if (item.category == EditorItemCategory.Building)
         {
-            if (layer == "sector")
-                filePath = Path.Combine(mapFolder, "buildings", folderName, "maze", "sector_maze.csv");
-            else if (layer == "arena")
-                filePath = Path.Combine(mapFolder, "buildings", folderName, "maze", "arena_maze.csv");
-            else if (layer == "collision")
-                filePath = Path.Combine(mapFolder, "buildings", folderName, "maze", "collision_maze.csv");
+            if (layer == "sector") filePath = Path.Combine(mapFolder, "buildings", folderName, "maze", "sector_maze.csv");
+            else if (layer == "arena") filePath = Path.Combine(mapFolder, "buildings", folderName, "maze", "arena_maze.csv");
+            else if (layer == "collision") filePath = Path.Combine(mapFolder, "buildings", folderName, "maze", "collision_maze.csv");
         }
         else if (item.category == EditorItemCategory.Object)
         {
-            if (layer == "gameobject")
-                filePath = Path.Combine(mapFolder, "objects", folderName, "maze", "game_object_maze.csv");
-            else if (layer == "collision")
-                filePath = Path.Combine(mapFolder, "objects", folderName, "maze", "collision_maze.csv");
+            if (layer == "gameobject") filePath = Path.Combine(mapFolder, "objects", folderName, "maze", "game_object_maze.csv");
+            else if (layer == "collision") filePath = Path.Combine(mapFolder, "objects", folderName, "maze", "collision_maze.csv");
         }
-        if (!File.Exists(filePath))
+        if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath)) return -1;
+
+        if (!_csvCache.TryGetValue(filePath, out var lines))
         {
-            Debug.LogWarning("Maze file not found: " + filePath);
-            return -1;
+            lines = File.ReadAllLines(filePath);
+            _csvCache[filePath] = lines;
         }
-        string[] lines = File.ReadAllLines(filePath);
-        if (localY >= lines.Length)
-        {
-            Debug.LogWarning("LocalY out of range in file: " + filePath);
-            return -1;
-        }
-        string[] cols = lines[localY].Split(',');
-        if (localX >= cols.Length)
-        {
-            Debug.LogWarning("LocalX out of range in file: " + filePath);
-            return -1;
-        }
-        int value;
-        if (int.TryParse(cols[localX].Trim(), out value))
-            return value;
-        else
-            return -1;
+
+        if (localY >= lines.Length) return -1;
+        var cols = lines[localY].Split(',');
+        if (localX >= cols.Length) return -1;
+
+        if (int.TryParse(cols[localX].Trim(), out var value)) return value;
+        return -1;
     }
+
 
     // ---------------- 新增：从实际文件中获取提供的 Block 名称 ----------------
     // 根据物品、层级和 Maze 数值返回 Block 名称
@@ -1029,5 +1036,208 @@ public class MapManager : MonoBehaviour
             if (kv.Value == id)
                 return kv.Key;
         return id.ToString();
+    }
+
+    // ★★★ 替换后的协程：支持“增量重建（脏矩形）”，否则回退全量重建
+    public IEnumerator RebuildMapMazeDataCoroutine(int yieldEveryItems = 1, int yieldEveryRows = 8)
+    {
+        // 初始化
+        int height = mapMeta.maze_height;
+        int width = mapMeta.maze_width;
+
+        // —— 若还没构建过 或 没有任何脏区，则做“全量” —— //
+        bool needFull = !hasMazeBuilt || _dirtyRects.Count == 0;
+
+        if (needFull)
+        {
+            // 全量：清四层网格 & 三张映射表
+            mapSectorMaze = new int[height, width];
+            mapArenaMaze = new int[height, width];
+            mapGameobjectMaze = new int[height, width];
+            mapCollisionMaze = new int[height, width];
+
+            mapSectorBlockMapping = new Dictionary<string, int>();
+            mapArenaBlockMapping = new Dictionary<string, int>();
+            mapGameobjectBlockMapping = new Dictionary<string, int>();
+
+            // 遍历已放置物品
+            int itemCounter = 0;
+            foreach (var placed in placedItems)
+            {
+                itemCounter++;
+                // 每处理若干个物体，就让一帧过去
+                if (itemCounter % yieldEveryItems == 0)
+                    yield return null;
+
+                if (placed.gridX < 0 || placed.gridY < 0) continue;
+
+                // 分块处理每个物体的局部格子
+                int rowsDone = 0;
+
+                for (int r = 0; r < placed.gridHeight; r++)
+                {
+                    for (int c = 0; c < placed.gridWidth; c++)
+                    {
+                        int gx = placed.gridX + c;
+                        int gy = placed.gridY + r;
+                        if (gx < 0 || gx >= width || gy < 0 || gy >= height) continue;
+
+                        if (placed.category == EditorItemCategory.Building)
+                        {
+                            int sv = GetProvidedMazeValue(placed.item, "sector", c, r);
+                            if (sv != -1) mapSectorMaze[gy, gx] = (sv == 0) ? 0 : GetOrAddBlockIndex(mapSectorBlockMapping, GetProvidedBlockName(placed.item, "sector", sv));
+
+                            int av = GetProvidedMazeValue(placed.item, "arena", c, r);
+                            if (av != -1) mapArenaMaze[gy, gx] = (av == 0) ? 0 : GetOrAddBlockIndex(mapArenaBlockMapping, GetProvidedBlockName(placed.item, "arena", av));
+
+                            int bc = GetProvidedMazeValue(placed.item, "collision", c, r);
+                            if (bc != -1) mapCollisionMaze[gy, gx] = CombineCollision(mapCollisionMaze[gy, gx], bc);
+                        }
+                        else // Object
+                        {
+                            int gv = GetProvidedMazeValue(placed.item, "gameobject", c, r);
+                            if (gv != -1) mapGameobjectMaze[gy, gx] = (gv == 0) ? 0 : GetOrAddBlockIndex(mapGameobjectBlockMapping, GetProvidedBlockName(placed.item, "gameobject", gv));
+
+                            int oc = GetProvidedMazeValue(placed.item, "collision", c, r);
+                            if (oc != -1) mapCollisionMaze[gy, gx] = CombineCollision(mapCollisionMaze[gy, gx], oc);
+                        }
+                    }
+
+                    rowsDone++;
+                    if (rowsDone % yieldEveryRows == 0)
+                        yield return null; // 每处理若干行就让一帧过去
+                }
+            }
+        }
+        else
+        {
+            // —— 增量：只处理脏矩形 —— //
+
+            // 1) 把所有脏矩形合并成一个（简单做法）
+            RectInt union = _dirtyRects[0];
+            for (int i = 1; i < _dirtyRects.Count; i++)
+            {
+                var r = _dirtyRects[i];
+                int xmin = Mathf.Min(union.xMin, r.xMin);
+                int ymin = Mathf.Min(union.yMin, r.yMin);
+                int xmax = Mathf.Max(union.xMax, r.xMax);
+                int ymax = Mathf.Max(union.yMax, r.yMax);
+                union = MinMaxRectInt(xmin, ymin, xmax, ymax);
+
+            }
+            union = ClampRect(union);
+
+            // 2) 清空这个矩形内的四层网格
+            for (int y = union.yMin; y < union.yMax; y++)
+            {
+                for (int x = union.xMin; x < union.xMax; x++)
+                {
+                    mapSectorMaze[y, x] = 0;
+                    mapArenaMaze[y, x] = 0;
+                    mapGameobjectMaze[y, x] = 0;
+                    mapCollisionMaze[y, x] = 0;
+                }
+                if ((y - union.yMin) % yieldEveryRows == 0) yield return null;
+            }
+
+            // 3) 用“与脏区相交”的物品重新烫印该矩形（映射表沿用现有，不清空）
+            int itemCounter = 0;
+            foreach (var placed in placedItems)
+            {
+                if (placed.gridX < 0 || placed.gridY < 0) continue;
+
+                RectInt fp = Footprint(placed);
+                if (!fp.Overlaps(union)) continue;
+
+                itemCounter++;
+                if (itemCounter % yieldEveryItems == 0) yield return null;
+
+                int rowsDone = 0;
+                for (int r = 0; r < placed.gridHeight; r++)
+                {
+                    for (int c = 0; c < placed.gridWidth; c++)
+                    {
+                        int gx = placed.gridX + c;
+                        int gy = placed.gridY + r;
+                        if (gx < union.xMin || gx >= union.xMax || gy < union.yMin || gy >= union.yMax) continue;
+
+                        if (placed.category == EditorItemCategory.Building)
+                        {
+                            int sv = GetProvidedMazeValue(placed.item, "sector", c, r);
+                            if (sv != -1) mapSectorMaze[gy, gx] = (sv == 0) ? 0 : GetOrAddBlockIndex(mapSectorBlockMapping, GetProvidedBlockName(placed.item, "sector", sv));
+
+                            int av = GetProvidedMazeValue(placed.item, "arena", c, r);
+                            if (av != -1) mapArenaMaze[gy, gx] = (av == 0) ? 0 : GetOrAddBlockIndex(mapArenaBlockMapping, GetProvidedBlockName(placed.item, "arena", av));
+
+                            int bc = GetProvidedMazeValue(placed.item, "collision", c, r);
+                            if (bc != -1) mapCollisionMaze[gy, gx] = CombineCollision(mapCollisionMaze[gy, gx], bc);
+                        }
+                        else // Object
+                        {
+                            int gv = GetProvidedMazeValue(placed.item, "gameobject", c, r);
+                            if (gv != -1) mapGameobjectMaze[gy, gx] = (gv == 0) ? 0 : GetOrAddBlockIndex(mapGameobjectBlockMapping, GetProvidedBlockName(placed.item, "gameobject", gv));
+
+                            int oc = GetProvidedMazeValue(placed.item, "collision", c, r);
+                            if (oc != -1) mapCollisionMaze[gy, gx] = CombineCollision(mapCollisionMaze[gy, gx], oc);
+                        }
+                    }
+
+                    rowsDone++;
+                    if (rowsDone % yieldEveryRows == 0)
+                        yield return null; // 每处理若干行就让一帧过去
+                }
+            }
+        }
+
+        hasMazeBuilt = true;
+        isDirty = false;
+        _dirtyRects.Clear(); // 本轮已处理
+    }
+
+    // ---------------- 新增：增量重建所需工具方法 ----------------
+
+    // 便捷：取物品在全图上的足迹矩形（左上原点）
+    private RectInt Footprint(PlacedItem pi)
+    {
+        int x = Mathf.Max(0, pi.gridX);
+        int y = Mathf.Max(0, pi.gridY);
+        int w = Mathf.Max(0, pi.gridWidth);
+        int h = Mathf.Max(0, pi.gridHeight);
+        return new RectInt(x, y, w, h);
+    }
+
+    // 合法化到地图范围
+    private RectInt ClampRect(RectInt r)
+    {
+        int W = mapMeta.maze_width, H = mapMeta.maze_height;
+        int x = Mathf.Clamp(r.x, 0, W);
+        int y = Mathf.Clamp(r.y, 0, H);
+        int w = Mathf.Clamp(r.xMax, 0, W) - x;
+        int h = Mathf.Clamp(r.yMax, 0, H) - y;
+        return new RectInt(x, y, Mathf.Max(0, w), Mathf.Max(0, h));
+    }
+
+    // 标记单个脏矩形
+    public void MarkDirtyRect(RectInt r)
+    {
+        r = ClampRect(r);
+        if (r.width <= 0 || r.height <= 0) return;
+        _dirtyRects.Add(r);
+        isDirty = true;
+    }
+
+    // 按物品足迹标脏
+    public void MarkDirtyByPlacedItem(PlacedItem pi)
+    {
+        if (pi.gridX < 0 || pi.gridY < 0) return;
+        MarkDirtyRect(Footprint(pi));
+    }
+
+    private static RectInt MinMaxRectInt(int xmin, int ymin, int xmax, int ymax)
+    {
+        // RectInt 构造需要 x,y,w,h；注意宽高非负
+        int w = Mathf.Max(0, xmax - xmin);
+        int h = Mathf.Max(0, ymax - ymin);
+        return new RectInt(xmin, ymin, w, h);
     }
 }

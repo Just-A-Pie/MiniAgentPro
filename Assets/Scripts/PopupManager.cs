@@ -8,9 +8,6 @@ using static MapManager;
 
 public class PopupManager : MonoBehaviour
 {
-    /*==============================*
-     *        公共配置字段          *
-     *==============================*/
     [Header("运行模式")]
     [Tooltip("SimulationPage 勾选，只查看信息，不允许编辑/删除/移动")]
     public bool readOnlyMode = false;
@@ -32,18 +29,20 @@ public class PopupManager : MonoBehaviour
         "container"
     };
 
-    // 用于管理弹窗的堆栈（用于子弹窗的返回）
+    // 弹窗层级（UI）栈
     private Stack<GameObject> popupStack = new Stack<GameObject>();
+    // 与 UI 层级一一对应的“当前物品上下文”栈
+    private Stack<PlacedItem> contextStack = new Stack<PlacedItem>();
 
     private GameObject currentPopup;
     private PlacedItem? currentPlacedItem;
-    // 保存打开子弹窗前的父物品数据
-    private PlacedItem? parentPlacedItem;
+
     private string originalName;
     private Dictionary<string, string> originalAttributes;
     private TMP_InputField nameInputField;
     private Button applyButton;
     private bool isApplied = false;
+
     // 保存各个属性行对应的 OptionalAttributeRowController（container 行就在其中）
     private Dictionary<string, OptionalAttributeRowController> attributeRows = new Dictionary<string, OptionalAttributeRowController>();
 
@@ -65,8 +64,7 @@ public class PopupManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 显示物品编辑弹窗，确保弹窗总在顶层（挂在 DialogCanvas 下）。
-    /// 设置基本信息、初始化属性行等。
+    /// 显示物品编辑弹窗（顶层）。清空所有栈。
     /// </summary>
     public void ShowPopup(PlacedItem placedItem)
     {
@@ -89,7 +87,11 @@ public class PopupManager : MonoBehaviour
             return;
 
         Debug.Log($"ShowPopup: 显示物品弹窗，ID: {placedItem.uniqueId}");
+
+        // 清空所有层级
         popupStack.Clear();
+        contextStack.Clear();
+
         if (currentPopup != null)
             Destroy(currentPopup);
 
@@ -99,8 +101,7 @@ public class PopupManager : MonoBehaviour
         currentPopup.transform.SetAsLastSibling();
 
         // 如果弹窗上挂有 Canvas，则设置排序，使其始终在顶层显示
-        Canvas cv = currentPopup.GetComponent<Canvas>();
-        if (cv != null)
+        if (currentPopup.TryGetComponent<Canvas>(out var cv))
         {
             cv.overrideSorting = true;
             cv.sortingOrder = 1000;
@@ -109,8 +110,6 @@ public class PopupManager : MonoBehaviour
         SetCloseButtonText(currentPopup, "×");
 
         currentPlacedItem = placedItem;
-        // 每次显示父弹窗时清空父数据
-        parentPlacedItem = null;
         originalName = placedItem.item.itemName;
         originalAttributes = placedItem.item.attributes != null
             ? new Dictionary<string, string>(placedItem.item.attributes)
@@ -164,6 +163,18 @@ public class PopupManager : MonoBehaviour
         }
 
         // 处理属性行（包括 container 行），重建全部属性行
+        BuildAttributeRowsFor(currentPlacedItem.Value);
+
+        DisableMapOperations();
+        Debug.Log("ShowPopup: 弹窗显示完成");
+
+        /*=================== 只读模式处理 ===================*/
+        if (readOnlyMode)
+            ApplyReadOnlyMask();
+    }
+
+    private void BuildAttributeRowsFor(PlacedItem item)
+    {
         var attributesPanel = currentPopup.transform.Find("AttributesPanel");
         if (attributesPanel != null)
         {
@@ -174,25 +185,18 @@ public class PopupManager : MonoBehaviour
             {
                 bool enabled = false;
                 string defaultVal = "";
-                if (placedItem.item.attributes != null && placedItem.item.attributes.ContainsKey(attrName))
+                if (item.item.attributes != null && item.item.attributes.ContainsKey(attrName))
                 {
                     enabled = true;
-                    defaultVal = placedItem.item.attributes[attrName];
+                    defaultVal = item.item.attributes[attrName];
                 }
                 CreateOptionalAttributeRow(attrName, attributesPanel, enabled, defaultVal);
             }
         }
         else
         {
-            Debug.LogWarning("ShowPopup: 未找到 AttributesPanel");
+            Debug.LogWarning("BuildAttributeRowsFor: 未找到 AttributesPanel");
         }
-
-        DisableMapOperations();
-        Debug.Log("ShowPopup: 弹窗显示完成");
-
-        /*=================== 只读模式处理 ===================*/
-        if (readOnlyMode)
-            ApplyReadOnlyMask();
     }
 
     /// <summary>
@@ -348,20 +352,10 @@ public class PopupManager : MonoBehaviour
                             }
                         }
 
-                        // 使用 parentPlacedItem 判断当前弹窗是否为父弹窗
-                        if (parentPlacedItem.HasValue && parentPlacedItem.Value.uniqueId == pi.uniqueId)
+                        // 如果当前弹窗正在显示这个母物品，刷新它的子物品区
+                        if (currentPlacedItem.HasValue && currentPlacedItem.Value.uniqueId == pi.uniqueId)
                         {
-                            Debug.Log($"DeleteItem: 当前弹窗为父物品 {pi.uniqueId}，刷新弹窗");
-                            popupStack.Clear();
-                            ClosePopup();
-                            PlacedItem? latestParent = MapManager.Instance.placedItems.Find(x => x.uniqueId == pi.uniqueId);
-                            if (latestParent.HasValue)
-                            {
-                                Debug.Log($"DeleteItem: 重新打开父物品弹窗，ID: {latestParent.Value.uniqueId}");
-                                ShowPopup(latestParent.Value);
-                                parentPlacedItem = null; // 清空父物品数据
-                                return; // 刷新后退出删除方法
-                            }
+                            UpdateParentItemUI(currentPlacedItem.Value);
                         }
                     }
                 }
@@ -384,7 +378,7 @@ public class PopupManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 关闭当前弹窗，如果有子弹窗则弹出上一级弹窗，否则恢复地图操作
+    /// 关闭当前弹窗：若有上层则回到上一层，并还原对应的上下文；否则恢复地图操作。
     /// </summary>
     private void ClosePopup()
     {
@@ -398,18 +392,25 @@ public class PopupManager : MonoBehaviour
         {
             currentPopup = popupStack.Pop();
             currentPopup.SetActive(true);
-            if (popupStack.Count == 0)
-            {
-                SetCloseButtonText(currentPopup, "×");
-                parentPlacedItem = null; // 弹窗堆栈为空时，清空父数据
-            }
+
+            // 恢复当前层物品上下文
+            if (contextStack.Count > 0)
+                currentPlacedItem = contextStack.Pop();
+            else
+                currentPlacedItem = null;
+
+            // 重新绑定当前弹窗的属性行引用
+            RebindAttributeRowsFromCurrentPopup();
+
+            // 按是否还能再返回设置按钮
+            SetCloseButtonText(currentPopup, popupStack.Count > 0 ? "←" : "×");
         }
         else
         {
             EnableMapOperations();
-            parentPlacedItem = null;
+            currentPlacedItem = null;
+            contextStack.Clear();
         }
-        currentPlacedItem = null;
     }
 
     /// <summary>
@@ -447,8 +448,8 @@ public class PopupManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 添加子物品：当点击加号按钮时调用，创建子物品数据、更新当前父物品的 container 属性，
-    /// 并调用 OptionalAttributeRowController 的 AddChild 方法生成子物品按钮。
+    /// 添加子物品：当点击加号按钮时调用，创建子物品数据、更新当前层物品的 container 属性，
+    /// 并在 UI 上追加子物品按钮。
     /// </summary>
     public void AddChildToContainer()
     {
@@ -487,6 +488,7 @@ public class PopupManager : MonoBehaviour
         if (!currentPlacedItem.HasValue)
             return;
         var updatedParent = currentPlacedItem.Value;
+
         string existing = "";
         if (updatedParent.item.attributes != null && updatedParent.item.attributes.ContainsKey("container"))
             existing = updatedParent.item.attributes["container"];
@@ -500,15 +502,29 @@ public class PopupManager : MonoBehaviour
         }
         currentPlacedItem = updatedParent;
 
-        if (attributeRows.ContainsKey("container"))
+        // UI 追加：使用 container 行的“子物品按钮预制体”
+        if (attributeRows.TryGetValue("container", out var containerRow) &&
+            containerRow != null && containerRow.containerChildButtonPrefab != null)
         {
-            OptionalAttributeRowController containerRowController = attributeRows["container"];
-            containerRowController.AddChild(newChildUniqueId, childInstance.thumbnail, childInstance.itemName);
-            Debug.Log($"AddChildToContainer: 调用 OptionalAttributeRowController.AddChild 添加子物品按钮，ID: {newChildUniqueId}");
+            GameObject childButtonObj = Instantiate(containerRow.containerChildButtonPrefab, childListContainer);
+            childButtonObj.name = newChildUniqueId;
+            var ccbc = childButtonObj.GetComponent<ContainerChildButtonController>();
+            if (ccbc != null)
+            {
+                ccbc.Initialize(newChildUniqueId, childInstance.thumbnail, childInstance.itemName);
+            }
+            else
+            {
+                Debug.LogError("AddChildToContainer: 子按钮预制体缺少 ContainerChildButtonController！");
+            }
+
+            // 保证加号按钮始终在最后
+            if (containerRow.addChildButton != null)
+                containerRow.addChildButton.transform.SetAsLastSibling();
         }
         else
         {
-            Debug.LogWarning("AddChildToContainer: 未找到 container 行的 OptionalAttributeRowController");
+            Debug.LogWarning("AddChildToContainer: 未找到 container 行或其子按钮预制体未设置！");
         }
 
         Transform parentTransform = MapManager.Instance.mapContent.Find(updatedParent.uniqueId);
@@ -524,7 +540,6 @@ public class PopupManager : MonoBehaviour
         }
 
         EditorManager.Instance.SetSelectedItem(null);
-
     }
 
     /// <summary>
@@ -546,7 +561,7 @@ public class PopupManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 打开子物品弹窗
+    /// 打开子物品弹窗（支持多层嵌套）：推入 UI 与上下文栈。
     /// </summary>
     public void OpenChildPopup(string childId)
     {
@@ -554,8 +569,9 @@ public class PopupManager : MonoBehaviour
         {
             popupStack.Push(currentPopup);
             currentPopup.SetActive(false);
-            if (!parentPlacedItem.HasValue)
-                parentPlacedItem = currentPlacedItem;
+            // 记录当前层的物品上下文
+            if (currentPlacedItem.HasValue)
+                contextStack.Push(currentPlacedItem.Value);
         }
         PlacedItem? childItem = MapManager.Instance.placedItems.Find(x => x.uniqueId == childId);
         if (!childItem.HasValue)
@@ -565,10 +581,13 @@ public class PopupManager : MonoBehaviour
             {
                 currentPopup = popupStack.Pop();
                 currentPopup.SetActive(true);
+                // 上下文回退
+                if (contextStack.Count > 0) currentPlacedItem = contextStack.Pop();
             }
             return;
         }
         currentPlacedItem = childItem;
+
         originalName = childItem.Value.item.itemName;
         originalAttributes = childItem.Value.item.attributes != null
             ? new Dictionary<string, string>(childItem.Value.item.attributes)
@@ -584,24 +603,39 @@ public class PopupManager : MonoBehaviour
         {
             closeButton.onClick.AddListener(() =>
             {
+                // 关闭当前子弹窗
                 Destroy(childPopup);
+
+                // 弹回上一层弹窗
                 if (popupStack.Count > 0)
                 {
                     currentPopup = popupStack.Pop();
                     currentPopup.SetActive(true);
-                    if (popupStack.Count == 0)
-                    {
-                        SetCloseButtonText(currentPopup, "×");
-                    }
+
+                    // 恢复上一层的物品上下文
+                    if (contextStack.Count > 0)
+                        currentPlacedItem = contextStack.Pop();
+                    else
+                        currentPlacedItem = null;
+
+                    // 重新绑定当前层的属性行 & 刷新子物品区
+                    RebindAttributeRowsFromCurrentPopup();
+                    if (currentPlacedItem.HasValue)
+                        UpdateParentItemUI(currentPlacedItem.Value);
+
+                    // 若还有更上层，可以继续返回，用“←”；否则“×”
+                    SetCloseButtonText(currentPopup, popupStack.Count > 0 ? "←" : "×");
                 }
                 else
                 {
                     EnableMapOperations();
-                    parentPlacedItem = null;
+                    currentPlacedItem = null;
+                    contextStack.Clear();
                 }
             });
         }
 
+        // 子弹窗布局
         var basicPanel = childPopup.transform.Find("Basic");
         if (basicPanel != null)
         {
@@ -632,24 +666,10 @@ public class PopupManager : MonoBehaviour
         var deleteButton = childPopup.transform.Find("DeleteButton")?.GetComponent<Button>();
         if (deleteButton != null)
             deleteButton.onClick.AddListener(() => DeleteItem(currentPlacedItem.Value));
-        var attributesPanel = childPopup.transform.Find("AttributesPanel");
-        if (attributesPanel != null)
-        {
-            foreach (Transform child in attributesPanel)
-                Destroy(child.gameObject);
-            attributeRows.Clear();
-            foreach (string attrName in optionalAttributes)
-            {
-                bool enabled = false;
-                string defaultVal = "";
-                if (currentPlacedItem.Value.item.attributes != null && currentPlacedItem.Value.item.attributes.ContainsKey(attrName))
-                {
-                    enabled = true;
-                    defaultVal = currentPlacedItem.Value.item.attributes[attrName];
-                }
-                CreateOptionalAttributeRow(attrName, attributesPanel, enabled, defaultVal);
-            }
-        }
+
+        // 子弹窗属性行（独立一套）
+        BuildAttributeRowsFor(currentPlacedItem.Value);
+
         DisableMapOperations();
 
         if (readOnlyMode)
@@ -657,22 +677,21 @@ public class PopupManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 刷新父物品弹窗中子物品的 UI，使其与最新的 container 数据一致。
+    /// 刷新当前激活弹窗（当前层物品）的子物品 UI。
     /// </summary>
     public void RefreshParentPopupChildren()
     {
-        if (!parentPlacedItem.HasValue)
+        if (!currentPlacedItem.HasValue)
         {
-            Debug.LogWarning("RefreshParentPopupChildren: parentPlacedItem 为 null");
+            Debug.LogWarning("RefreshParentPopupChildren: currentPlacedItem 为空");
             return;
         }
-        Debug.Log($"RefreshParentPopupChildren: 刷新父弹窗中子物品按钮，父物品 ID: {parentPlacedItem.Value.uniqueId}");
-        UpdateParentItemUI(parentPlacedItem.Value);
+        UpdateParentItemUI(currentPlacedItem.Value);
     }
 
     private void UpdateParentItemUI(PlacedItem parentItem)
     {
-        Debug.Log($"UpdateParentItemUI: 刷新父弹窗，父物品 ID: {parentItem.uniqueId}");
+        Debug.Log($"UpdateParentItemUI: 刷新当前层弹窗，物品 ID: {parentItem.uniqueId}");
         if (childListContainer == null)
         {
             Debug.LogWarning("UpdateParentItemUI: childListContainer 未找到！");
@@ -687,14 +706,13 @@ public class PopupManager : MonoBehaviour
         }
         foreach (Transform child in toRemove)
         {
-            Debug.Log($"UpdateParentItemUI: 删除子物品按钮: {child.name}");
             Destroy(child.gameObject);
         }
-        // 根据父物品 container 属性重新生成子物品按钮
+        // 根据该物品 container 属性生成子物品按钮
         if (parentItem.item.attributes != null && parentItem.item.attributes.ContainsKey("container"))
         {
             string containerStr = parentItem.item.attributes["container"];
-            Debug.Log($"UpdateParentItemUI: 父物品 container 值: '{containerStr}'");
+            Debug.Log($"UpdateParentItemUI: container 值: '{containerStr}'");
             if (!string.IsNullOrEmpty(containerStr))
             {
                 string[] childIds = containerStr.Split(',');
@@ -703,7 +721,6 @@ public class PopupManager : MonoBehaviour
                     PlacedItem? childItem = MapManager.Instance.placedItems.Find(x => x.uniqueId == childId);
                     if (childItem.HasValue)
                     {
-                        Debug.Log($"UpdateParentItemUI: 生成子物品按钮，ID: {childItem.Value.uniqueId}");
                         CreateChildButton(childItem.Value);
                     }
                     else
@@ -713,7 +730,7 @@ public class PopupManager : MonoBehaviour
                 }
             }
         }
-        Debug.Log($"UpdateParentItemUI: 刷新完成，父物品 ID: {parentItem.uniqueId}");
+        Debug.Log($"UpdateParentItemUI: 刷新完成，物品 ID: {parentItem.uniqueId}");
     }
 
     private void CreateChildButton(PlacedItem childItem)
@@ -723,17 +740,31 @@ public class PopupManager : MonoBehaviour
             Debug.LogWarning("CreateChildButton: childListContainer 未找到！");
             return;
         }
-        GameObject childButtonObj = Instantiate(optionalAttributeRowPrefab, childListContainer);
-        childButtonObj.name = childItem.uniqueId;
-        ContainerChildButtonController ccbc = childButtonObj.GetComponent<ContainerChildButtonController>();
-        if (ccbc != null)
+
+        // 使用“container 行”的子物品按钮预制体（不要再用 optionalAttributeRowPrefab）
+        if (attributeRows.TryGetValue("container", out var containerRow) &&
+            containerRow != null && containerRow.containerChildButtonPrefab != null)
         {
-            ccbc.Initialize(childItem.uniqueId, childItem.item.thumbnail, childItem.item.itemName);
-            Debug.Log($"CreateChildButton: 创建子物品按钮成功，ID: {childItem.uniqueId}");
+            GameObject childButtonObj = Instantiate(containerRow.containerChildButtonPrefab, childListContainer);
+            childButtonObj.name = childItem.uniqueId;
+            ContainerChildButtonController ccbc = childButtonObj.GetComponent<ContainerChildButtonController>();
+            if (ccbc != null)
+            {
+                ccbc.Initialize(childItem.uniqueId, childItem.item.thumbnail, childItem.item.itemName);
+                Debug.Log($"CreateChildButton: 创建子物品按钮成功，ID: {childItem.uniqueId}");
+            }
+            else
+            {
+                Debug.LogError("CreateChildButton: 预制体缺少 ContainerChildButtonController！");
+            }
+
+            // 保证加号按钮在最后
+            if (containerRow.addChildButton != null)
+                containerRow.addChildButton.transform.SetAsLastSibling();
         }
         else
         {
-            Debug.LogWarning($"CreateChildButton: ContainerChildButtonController 未挂载在 {childButtonObj.name}");
+            Debug.LogError("CreateChildButton: 未找到 container 行或未设置子物品按钮预制体！");
         }
     }
 
@@ -758,5 +789,34 @@ public class PopupManager : MonoBehaviour
         // 3) 隐藏属性编辑区域（如需只读可自行改造）
         if ((t = currentPopup.transform.Find("AttributesPanel")) != null)
             t.gameObject.SetActive(false);
+    }
+
+    // ===== 新增：返回某层后，重建 attributeRows 指向“当前弹窗”的行控件 =====
+    private void RebindAttributeRowsFromCurrentPopup()
+    {
+        attributeRows.Clear();
+        if (currentPopup == null) return;
+
+        var attributesPanel = currentPopup.transform.Find("AttributesPanel");
+        if (attributesPanel == null) return;
+
+        foreach (Transform row in attributesPanel)
+        {
+            var ctrl = row.GetComponent<OptionalAttributeRowController>();
+            if (ctrl == null) continue;
+
+            // 行节点名是 "<attrName>_Row"
+            string key = row.name;
+            if (key.EndsWith("_Row")) key = key.Substring(0, key.Length - 4);
+
+            attributeRows[key] = ctrl;
+
+            // 重新绑定 container 的“+”按钮
+            if (key == "container" && ctrl.addChildButton != null)
+            {
+                ctrl.addChildButton.onClick.RemoveAllListeners();
+                ctrl.addChildButton.onClick.AddListener(AddChildToContainer);
+            }
+        }
     }
 }

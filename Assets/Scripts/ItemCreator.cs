@@ -1,29 +1,28 @@
-// ÎÄ¼ş: ItemCreator.cs
-using UnityEngine;
+ï»¿using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// ±à¼­Æ÷ & Simulation ¹²ÓÃµÄÎïÆ·ÊµÀı»¯¹¤¾ß¡£
-/// * Èô´¦ÓÚ EditingPage£ºÒÀ¾ÉĞ´Èë MapManager.placedItems£¬Ê¹ÓÃ MapManager.backgroundScaleFactor¡£
-/// * Èô´¦ÓÚ SimulationPage£ºMapManager ¿ÉÄÜÎª null ¡ª¡ª
-///   1) ´Ó SimulationMapManager »ñÈ¡Ëõ·ÅÒò×Ó£»
-///   2) ²»°ÑÊı¾İĞ´Èë placedItems£»
-///   3) µã»÷ÈÔ¿Éµ¯³ö PopupManager£¨readOnlyMode£©¡£
+/// ç¼–è¾‘å™¨ & Simulation å…±ç”¨çš„ç‰©å“å®ä¾‹åŒ–å·¥å…·ã€‚
+/// * è‹¥å¤„äº EditingPageï¼šä¾æ—§å†™å…¥ MapManager.placedItemsï¼Œä½¿ç”¨ MapManager.backgroundScaleFactorã€‚
+/// * è‹¥å¤„äº SimulationPageï¼šMapManager å¯èƒ½ä¸º null â€”â€”
+///   1) ä» SimulationMapManager è·å–ç¼©æ”¾å› å­ï¼›
+///   2) ä¸æŠŠæ•°æ®å†™å…¥ placedItemsï¼›
+///   3) ç‚¹å‡»ä»å¯å¼¹å‡º PopupManagerï¼ˆreadOnlyModeï¼‰ã€‚
 /// </summary>
 public static class ItemCreator
 {
     public static void CreateItemInstanceWithClick(
-        EditorItem item,
-        int gridX,
-        int gridY,
-        EditorItemCategory cat,
-        RectTransform mapContent,
-        PopupManager popupManager,
-        string uniqueId = null,
-        string itemName = null,
-        System.Collections.Generic.Dictionary<string, string> attributes = null)
+    EditorItem item,
+    int gridX,
+    int gridY,
+    EditorItemCategory cat,
+    RectTransform mapContent,
+    PopupManager popupManager,
+    string uniqueId = null,
+    string itemName = null,
+    System.Collections.Generic.Dictionary<string, string> attributes = null)
     {
-        // 1) Ëõ·ÅÒò×Ó & ×ø±ê
+        // 1) ç¼©æ”¾å› å­ & åæ ‡
         float factor = 1f;
         if (MapManager.Instance != null)
             factor = MapManager.Instance.backgroundScaleFactor;
@@ -46,13 +45,16 @@ public static class ItemCreator
         rt.anchorMax = new Vector2(0, 1);
         rt.anchoredPosition = pos;
 
-        // ²ã¼¶£ºObject > Building > ±³¾°
+        // å±‚çº§ï¼šObject > Building > èƒŒæ™¯
         if (cat == EditorItemCategory.Object)
             go.transform.SetAsLastSibling();
         else
             go.transform.SetSiblingIndex(mapContent.childCount - 1);
 
-        // 3) ID & ¸±±¾Êı¾İ
+        // è®©æ»šè½®/å³é”®æ‹–æ‹½äº‹ä»¶ä¼ é€’åˆ°çˆ¶å±‚æ§åˆ¶å™¨
+        go.AddComponent<UIEventForwarder>();
+
+        // 3) ID & å‰¯æœ¬æ•°æ®
         if (string.IsNullOrEmpty(uniqueId))
             uniqueId = System.Guid.NewGuid().ToString();
         go.name = uniqueId;
@@ -85,45 +87,52 @@ public static class ItemCreator
             gridHeight = item.gridHeight
         };
 
-        // 4) Ğ´Èë MapManager.placedItems (½ö±à¼­Æ÷)
+        // 4) å†™å…¥ MapManager.placedItems (ä»…ç¼–è¾‘å™¨)
         if (MapManager.Instance != null)
         {
             MapManager.Instance.placedItems.Add(placedItem);
-            Debug.Log("[ItemCreator] Ğ´Èë MapManager.placedItems");
+            Debug.Log("[ItemCreator] å†™å…¥ MapManager.placedItems");
+
+            // â˜… æ–°å¢ï¼šæ·»åŠ åæŒ‰ç‰©å“è¶³è¿¹å¢é‡æ ‡è„ï¼ˆè®©é‡å»ºèµ°å¢é‡åˆ†æ”¯ï¼‰
+            MapManager.Instance.MarkDirtyByPlacedItem(placedItem);
         }
 
-        // 5) µã»÷µ¯´°
+        // 5) ç‚¹å‡»å¼¹çª—
         Button btn = go.AddComponent<Button>();
         btn.onClick.AddListener(() => OnItemClicked(placedItem, popupManager));
 
-        // 6) ÈİÆ÷ Logo (½ö±à¼­Æ÷ & ÓĞ container)
+        // 6) å®¹å™¨â€œæ°”æ³¡â€ (ä»…ç¼–è¾‘å™¨ & æœ‰ container)
         if (MapManager.Instance != null)
         {
             ContainerLogoController logoCtrl = go.GetComponent<ContainerLogoController>();
             if (logoCtrl == null) logoCtrl = go.AddComponent<ContainerLogoController>();
+
             bool hasContainer = copiedItem.attributes != null &&
                                 copiedItem.attributes.ContainsKey("container") &&
                                 !string.IsNullOrEmpty(copiedItem.attributes["container"]);
+
+            // æ˜¾ç¤ºæ°”æ³¡ï¼ˆé¦–æ¬¡ä¼šåˆ›å»ºå¹¶è®¾ç½® iconï¼‰
             logoCtrl.UpdateLogoVisibility(hasContainer);
         }
 
-        // 7) ±ê¼ÇÔà²¢Ë¢ĞÂ Overlay
+        // 7) æ ‡è®°è„å¹¶åˆ·æ–° Overlayï¼ˆç›´æ¥èµ°å¸¦é®ç½©åç¨‹ï¼Œé¿å…â€œæœªæ„å»º/å·²è„â€åˆ†æ”¯åˆ¤æ–­ï¼‰
         if (MapManager.Instance != null)
         {
             MapManager.Instance.isDirty = true;
             if (GridOverlayManager.Instance != null &&
                 GridOverlayManager.Instance.currentMode != GridOverlayManager.OverlayMode.None)
             {
-                GridOverlayManager.Instance.RefreshOverlay();
+                GridOverlayManager.Instance.RefreshWithOverlay();
             }
         }
     }
+
 
     private static void OnItemClicked(MapManager.PlacedItem selected, PopupManager popupManager)
     {
         if (popupManager == null)
         {
-            Debug.LogWarning("[ItemCreator] PopupManager Î´°ó¶¨£¬ÎŞ·¨µ¯´°");
+            Debug.LogWarning("[ItemCreator] PopupManager æœªç»‘å®šï¼Œæ— æ³•å¼¹çª—");
             return;
         }
 

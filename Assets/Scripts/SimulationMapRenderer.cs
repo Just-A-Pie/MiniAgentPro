@@ -1,5 +1,4 @@
-// ÎÄ¼ş£ºSimulationMapRenderer.cs
-using UnityEngine;
+ï»¿using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -8,14 +7,14 @@ using UnityEngine.EventSystems;
 
 public class SimulationMapRenderer : MonoBehaviour
 {
-    [Header("×ÊÔ´¸ùÄ¿Â¼ (Áô¿Õ = GameManager.resourcePath)")]
+    [Header("èµ„æºæ ¹ç›®å½• (ç•™ç©º = GameManager.resourcePath)")]
     public string mapFolder;
 
-    [Header("UI ÒıÓÃ")]
+    [Header("UI å¼•ç”¨")]
     public RectTransform mapContent;
     public PopupManager popupManager;
 
-    [Header("½»»¥¿ØÖÆÆ÷")]
+    [Header("äº¤äº’æ§åˆ¶å™¨")]
     public SimulationUIController uiController;
 
     [System.Serializable]
@@ -33,21 +32,22 @@ public class SimulationMapRenderer : MonoBehaviour
                         ? GameManager.Instance.resourcePath
                         : "";
 
-        Debug.Log($"[SimRenderer] mapFolder = {mapFolder}");
+        Debug.Log($"[SIMBOOT:S3] SimRenderer Start(), mapFolder={mapFolder}");
 
-        // µÈ´ıµØÍ¼±³¾°¼ÓÔØÍê±Ï
+        // ç­‰å¾…åœ°å›¾èƒŒæ™¯åŠ è½½å®Œæ¯•
         yield return new WaitUntil(() =>
             SimulationMapManager.Instance != null &&
             SimulationMapManager.Instance.mapImage != null
         );
+        Debug.Log("[SIMBOOT:S3] Map background ready, begin templating/placement");
 
         List<EditorItem> templates = BuildTemplateList();
-        Debug.Log($"[SimRenderer] Ä£°åÊıÁ¿ {templates.Count}");
+        Debug.Log($"[SIMBOOT:S3] Templates built: {templates.Count}");
 
         string dataRoot = Path.Combine(mapFolder, "map", "map_data");
         var bData = LoadJson<MapManager.BuildingsData>(Path.Combine(dataRoot, "buildings_data.json"));
         var oData = LoadJson<MapManager.ObjectsData>(Path.Combine(dataRoot, "objects_data.json"));
-        Debug.Log($"[SimRenderer] buildings={bData.buildings.Count}  objects={oData.objects.Count}");
+        Debug.Log($"[SIMBOOT:S3] map_data loaded: buildings={bData.buildings.Count}, objects={oData.objects.Count}");
 
         int okB = 0, okO = 0;
         foreach (var b in bData.buildings)
@@ -55,7 +55,7 @@ public class SimulationMapRenderer : MonoBehaviour
         foreach (var o in oData.objects)
             if (Place(templates, EditorItemCategory.Object, o.typeId, o.x, o.y, o.uniqueId, o.itemName, ConvertAttr(o.attributes))) okO++;
 
-        Debug.Log($"[SimRenderer] Building ³É¹¦ {okB}/{bData.buildings.Count}  Object ³É¹¦ {okO}/{oData.objects.Count}");
+        Debug.Log($"[SIMBOOT:S3] Placement finished. Building {okB}/{bData.buildings.Count}, Object {okO}/{oData.objects.Count}");
     }
 
     private List<EditorItem> BuildTemplateList()
@@ -70,7 +70,7 @@ public class SimulationMapRenderer : MonoBehaviour
     {
         if (!Directory.Exists(root))
         {
-            Debug.LogWarning($"[SimRenderer] Ä¿Â¼²»´æÔÚ {root}");
+            Debug.LogWarning($"[SimRenderer] ç›®å½•ä¸å­˜åœ¨ {root}");
             return;
         }
         foreach (string folder in Directory.GetDirectories(root))
@@ -91,7 +91,7 @@ public class SimulationMapRenderer : MonoBehaviour
                 attributes = new Dictionary<string, string>()
             };
             list.Add(item);
-            Debug.Log($"[SimRenderer] Ä£°å {cat} {item.itemName} typeId={item.typeId}");
+            Debug.Log($"[SimRenderer] æ¨¡æ¿ {cat} {item.itemName} typeId={item.typeId}");
         }
     }
 
@@ -115,13 +115,13 @@ public class SimulationMapRenderer : MonoBehaviour
         var tpl = templates.Find(t => t.category == cat && t.typeId == typeId);
         if (tpl == null)
         {
-            Debug.LogError($"[SimRenderer] È±ÉÙÄ£°å cat={cat} typeId={typeId}");
+            Debug.LogError($"[SimRenderer] ç¼ºå°‘æ¨¡æ¿ cat={cat} typeId={typeId}");
             return false;
         }
 
         Debug.Log($"[SimRenderer] Place {tpl.itemName} ({cat}) id={uid} grid=({gx},{gy})");
 
-        // 1) ´´½¨ÊµÀı
+        // 1) åˆ›å»ºå®ä¾‹
         ItemCreator.CreateItemInstanceWithClick(
             tpl, gx, gy, cat,
             mapContent, popupManager,
@@ -129,16 +129,16 @@ public class SimulationMapRenderer : MonoBehaviour
             attr
         );
 
-        // 2) ÕÒµ½ËüµÄ GameObject
+        // 2) æ‰¾åˆ°å®ƒçš„ GameObject
         Transform inst = mapContent.Find(uid);
         if (inst == null)
         {
-            Debug.LogWarning($"[SimRenderer] ÕÒ²»µ½ÊµÀı go name={uid}");
+            Debug.LogWarning($"[SimRenderer] æ‰¾ä¸åˆ°å®ä¾‹ go name={uid}");
             return true;
         }
         var go = inst.gameObject;
 
-        // 3) ¹¹ÔìÒ»¸ö·ÅÖÃÎïÊı¾İ¶ÔÏó
+        // 3) æ„é€ ä¸€ä¸ªæ”¾ç½®ç‰©æ•°æ®å¯¹è±¡
         var placedItem = new MapManager.PlacedItem
         {
             uniqueId = uid,
@@ -146,7 +146,7 @@ public class SimulationMapRenderer : MonoBehaviour
             {
                 uniqueId = uid,
                 typeId = tpl.typeId,
-                itemName = name,
+                itemName = string.IsNullOrEmpty(name) ? tpl.itemName : name,
                 gridWidth = tpl.gridWidth,
                 gridHeight = tpl.gridHeight,
                 category = tpl.category,
@@ -161,23 +161,23 @@ public class SimulationMapRenderer : MonoBehaviour
             gridHeight = tpl.gridHeight
         };
 
-        // 4) Outline
+        // 4) Outline â€”â€” ç»Ÿä¸€ä¸ºä¸ Agent ä¸€è‡´çš„æ ·å¼ï¼šé»‘è‰² + ç»†æè¾¹
         var outline = go.GetComponent<Outline>() ?? go.AddComponent<Outline>();
-        outline.effectColor = Color.yellow;
-        outline.effectDistance = new Vector2(1, 1);
+        outline.effectColor = new Color(0f, 0f, 0f, 1f);
+        outline.effectDistance = new Vector2(0.2f, 0.2f);
         outline.enabled = false;
 
-        // 5) ×¢²áµ½ UIController
+        // 5) æ³¨å†Œåˆ° UIController
         if (uiController != null)
         {
             uiController.RegisterItem(uid, outline, placedItem);
         }
         else
         {
-            Debug.LogError($"[SimRenderer] uiController Î´ÉèÖÃ£¬ÎŞ·¨×¢²á id={uid}");
+            Debug.LogError($"[SimRenderer] uiController æœªè®¾ç½®ï¼Œæ— æ³•æ³¨å†Œ id={uid}");
         }
 
-        // 6) Ìí¼Ó½»»¥»Øµ÷
+        // 6) æ·»åŠ äº¤äº’å›è°ƒï¼ˆä¿æŒåŸé€»è¾‘ï¼‰
         var trigger = go.GetComponent<EventTrigger>() ?? go.AddComponent<EventTrigger>();
         trigger.triggers.Clear();
 
@@ -197,9 +197,13 @@ public class SimulationMapRenderer : MonoBehaviour
         });
         trigger.triggers.Add(ext);
 
+        // â€”â€” è¿™é‡Œæ”¹ï¼šä»…å·¦é”®ç‚¹å‡»æ‰è§¦å‘
         var clk = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
-        clk.callback.AddListener((_) =>
+        clk.callback.AddListener((dataObj) =>
         {
+            var ped = dataObj as PointerEventData;
+            if (ped == null || ped.button != PointerEventData.InputButton.Left) return;
+
             Debug.Log($"[SimRenderer] PointerClick -> {uid}");
             uiController.OnItemPointerClick(uid);
         });
